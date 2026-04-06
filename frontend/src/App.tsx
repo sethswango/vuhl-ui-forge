@@ -12,6 +12,8 @@ import { nanoid } from "nanoid";
 import { Stack } from "./lib/stacks";
 import { CodeGenerationModel } from "./lib/models";
 import useBrowserTabIndicator from "./hooks/useBrowserTabIndicator";
+import { useSession } from "./hooks/useSession";
+import { postSessionVariants, selectSessionVariant } from "./lib/session-api";
 import { LuChevronLeft } from "react-icons/lu";
 import {
   buildAssistantHistoryMessage,
@@ -109,9 +111,13 @@ function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [mobilePane, setMobilePane] = useState<"preview" | "chat">("preview");
+  const lastSelectedVariantSyncRef = useRef<string | null>(null);
   const showSelectAndEditFeature =
     settings.generatedCodeConfig === Stack.HTML_TAILWIND ||
     settings.generatedCodeConfig === Stack.HTML_CSS;
+
+  // Session awareness: read session ID from URL, load context if available
+  const { sessionId, context: sessionContext } = useSession();
 
   // Indicate coding state using the browser tab's favicon and title
   useBrowserTabIndicator(appState === AppState.CODING);
@@ -127,6 +133,52 @@ function App() {
       }));
     }
   }, [settings.generatedCodeConfig, setSettings]);
+
+  // Pre-populate settings from session context when available
+  useEffect(() => {
+    if (!sessionContext) return;
+    if (sessionContext.stack) {
+      const stackValues = Object.values(Stack) as string[];
+      if (stackValues.includes(sessionContext.stack)) {
+        setStack(sessionContext.stack as Stack);
+      }
+    }
+    if (sessionContext.instructions) {
+      setInputMode("text");
+      setInitialPrompt(sessionContext.instructions);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionContext]);
+
+  useEffect(() => {
+    if (!sessionId || appState !== AppState.CODE_READY || !head) {
+      return;
+    }
+
+    const commit = commits[head];
+    if (!commit || commit.variants.length === 0) {
+      return;
+    }
+
+    const selectedVariantIndex = commit.selectedVariantIndex || 0;
+    const selectedVariant = commit.variants[selectedVariantIndex];
+    if (!selectedVariant?.code?.trim()) {
+      return;
+    }
+
+    const syncKey = `${head}:${selectedVariantIndex}`;
+    if (lastSelectedVariantSyncRef.current === syncKey) {
+      return;
+    }
+
+    selectSessionVariant(sessionId, selectedVariantIndex)
+      .then(() => {
+        lastSelectedVariantSyncRef.current = syncKey;
+      })
+      .catch((err) =>
+        console.warn("Failed to sync selected session variant", err)
+      );
+  }, [sessionId, appState, head, commits]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
@@ -230,8 +282,12 @@ function App() {
 
     const { variantHistory, ...requestParams } = params;
 
-    // Merge settings with params
-    const updatedParams = { ...requestParams, ...settings };
+    // Merge settings with params and preserve optional session context.
+    const updatedParams = {
+      ...requestParams,
+      ...settings,
+      ...(sessionId ? { sessionId } : {}),
+    };
 
     // Use 4 variants for create, 2 for edits to match backend counts
     // and avoid a flash when the backend sends the actual variant count
@@ -453,6 +509,26 @@ function App() {
       onComplete: () => {
         finishInFlightEvents("complete");
         setAppState(AppState.CODE_READY);
+
+        // Sync completed variants back to the MCP session if active
+        if (sessionId) {
+          const finalCommit = useProjectStore.getState().commits[commit.hash];
+          if (finalCommit) {
+            const variantPayloads = finalCommit.variants
+              .map((v, i) => ({
+                variantIndex: i,
+                code: v.code,
+                stack: settings.generatedCodeConfig,
+                model: v.model,
+              }))
+              .filter((v) => v.code.trim().length > 0);
+            if (variantPayloads.length > 0) {
+              postSessionVariants(sessionId, variantPayloads).catch(
+                (err) => console.warn("Failed to sync variants to session", err)
+              );
+            }
+          }
+        }
       },
     });
   }

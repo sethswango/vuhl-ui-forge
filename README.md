@@ -1,6 +1,6 @@
-# VuhluiForge
+# VUHL UI Forge
 
-VuhluiForge is a unified design-to-code workbench built from the open-source [`abi/screenshot-to-code`](https://github.com/abi/screenshot-to-code) engine and extended for project-aware workflows.
+`VUHL UI Forge` (`vuhl-ui-forge`) is a unified design-to-code workbench built from the open-source [`abi/screenshot-to-code`](https://github.com/abi/screenshot-to-code) engine and extended for project-aware workflows.
 
 Instead of treating "screenshot to code" as the product name, this repo positions that capability as one engine inside a broader toolchain:
 
@@ -19,6 +19,37 @@ Top-level structure:
 - `frontend/` - React/Vite application
 - `backend/` - FastAPI backend and model/provider pipeline
 - `mcp/` - VuhluiForge MCP package and project-aware workflow layer
+
+## Two Ways To Use It
+
+### Standalone Web App
+
+Use the web app when you want a fast design-to-code workspace without needing an IDE-driven orchestration loop.
+
+Flow:
+
+- open the web UI
+- provide a screenshot, text prompt, or recording
+- stream multiple variants live
+- inspect and iterate in the browser
+
+This is the direct evolution of the upstream engine experience.
+
+### MCP-Driven Workflow
+
+Use the MCP path when you want `Claude CLI`, `Codex CLI`, or `Cursor` to participate in a project-aware workflow.
+
+Flow:
+
+- an IDE agent gathers codebase context
+- the MCP creates a design session
+- the browser UI opens with context attached
+- the user reviews streamed variants and approves one
+- the approved result is exported back to the IDE agent as an integration package
+
+This is the main VuhluiForge differentiator.
+
+The MCP path does **not** introduce a second browser UI. It orchestrates the existing `frontend/` app by creating sessions and opening that same UI with session context attached.
 
 ## Supported Output Stacks
 
@@ -80,7 +111,7 @@ docker-compose up -d --build
 
 ## MCP Direction
 
-The `mcp/` area is where VuhluiForge adds project-aware workflows on top of the core design-to-code engine.
+The `mcp/` area is where `VUHL UI Forge` adds project-aware workflows on top of the core design-to-code engine.
 
 The goal is not just generating code from an image, but generating code that fits an existing codebase by incorporating:
 
@@ -91,11 +122,92 @@ The goal is not just generating code from an image, but generating code that fit
 - CSS variables and design tokens
 - feature-specific integration context
 
+Current MCP tool direction in the unified repo:
+
+- `start_design_session`
+- `provide_context`
+- `open_design_ui`
+- `get_design_results`
+- `list_design_sessions`
+- `select_design_variant`
+- `quick_design`
+
+These tools are session-oriented wrappers around the unified repo's browser UI and backend session APIs.
+
+## Why The Streaming Loop Matters
+
+Traditional UI spec drafting is often slow and lossy:
+
+- static mockup handoff loses implementation context
+- one-shot generation forces long waits and brittle prompts
+- the final artifact is often a screenshot or vague spec instead of an integratable package
+
+`VUHL UI Forge` takes a different path:
+
+- variants stream live instead of arriving all at once
+- the user can compare options immediately
+- project context improves prompt quality before generation starts
+- the approved result can be handed back to an agent for clean integration
+
+That combination is what makes it better for high-fidelity UI work than a plain prompt-to-HTML tool.
+
+## System Diagrams
+
+### Standalone Generation Loop
+
+```mermaid
+flowchart LR
+    A[User Input<br/>Screenshot / Text / Recording] --> B[Frontend UI]
+    B --> C[WebSocket Request]
+    C --> D[FastAPI Generation Pipeline]
+    D --> E[Prompt Construction]
+    E --> F[Model Variants]
+    F --> G[Streaming Responses]
+    G --> H[Variant Preview Grid]
+    H --> I[Iterate / Refine]
+```
+
+### MCP-Assisted Approval Loop
+
+```mermaid
+flowchart LR
+    A[Claude CLI / Codex CLI / Cursor] --> B[Context Gathering]
+    B --> C[MCP Session Creation]
+    C --> D[Browser UI With Session]
+    D --> E[Streaming Variant Generation]
+    E --> F[User Review + Approval]
+    F --> G[Approved Development Package]
+    G --> H[IDE Agent Integration]
+    H --> I[Target Codebase Updated]
+```
+
+### Context-Aware Prompt Pipeline
+
+```mermaid
+flowchart TD
+    A[Target Repo Scan] --> B[Project Context]
+    A2[Feature Request / ACs] --> C[Feature Context]
+    A3[Image / Mockup / Recording] --> D[Visual Intent]
+    B --> E[Prompt Construction Layer]
+    C --> E
+    D --> E
+    E --> F[Variant Generation]
+    F --> G[Review + Selection]
+    G --> H[Export Package For Integration]
+```
+
+## Target Outcome
+
+The target end state is:
+
+- standalone web app remains useful on its own
+- MCP mode becomes the project-aware path for real implementation work
+- approved renders turn into structured integration packages instead of dead-end mockups
+- upstream engine improvements can still be pulled in without rebuilding the whole product
+
 ## Upstream Relationship
 
-- Canonical local/personal repo: `https://github.com/sethswango/vuhl-ui-forge`
 - Upstream engine: `https://github.com/abi/screenshot-to-code`
-- Work remote currently used for MCP-oriented sharing: `https://github.com/vu-pdt/VUHL-UI-Forge-MCP`
 
 The intent is to keep pulling ideas and improvements from upstream while evolving VuhluiForge toward project-aware implementation workflows.
 

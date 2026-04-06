@@ -37,3 +37,19 @@ async def test_extracts_gemini_api_key_from_env_when_not_in_request(monkeypatch:
     )
 
     assert extracted.gemini_api_key == "gemini-from-env"
+
+
+@pytest.mark.asyncio
+async def test_extracts_session_id_when_provided() -> None:
+    stage = ParameterExtractionStage(AsyncMock())
+
+    extracted = await stage.extract_and_validate(
+        {
+            "generatedCodeConfig": "html_tailwind",
+            "inputMode": "text",
+            "prompt": {"text": "hello"},
+            "sessionId": "session-123",
+        }
+    )
+
+    assert extracted.session_id == "session-123"

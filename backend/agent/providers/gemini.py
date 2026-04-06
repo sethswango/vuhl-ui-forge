@@ -267,7 +267,7 @@ class GeminiProviderSession(ProviderSession):
     ):
         self._client = client
         self._model = model
-        self._tools = tools
+        self._tools = cast(Any, tools)
         self._total_usage = TokenUsage()
 
         self._system_prompt = str(prompt_messages[0].get("content", ""))

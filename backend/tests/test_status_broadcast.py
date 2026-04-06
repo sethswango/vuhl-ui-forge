@@ -45,6 +45,7 @@ async def test_video_update_broadcasts_two_variants() -> None:
         history=[],
         file_state=None,
         option_codes=[],
+        session_id=None,
     )
 
     middleware = StatusBroadcastMiddleware()
@@ -97,6 +98,7 @@ async def test_image_update_broadcasts_two_variants() -> None:
         history=[],
         file_state={"path": "index.html", "content": "<html></html>"},
         option_codes=[],
+        session_id=None,
     )
 
     middleware = StatusBroadcastMiddleware()

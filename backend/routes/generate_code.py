@@ -34,6 +34,8 @@ from typing import (
 from openai.types.chat import ChatCompletionMessageParam
 
 from utils import print_prompt_preview
+from sessions.models import VariantStatus
+from sessions.service import SessionNotFoundError, session_service
 
 # WebSocket message types
 MessageType = Literal[
@@ -236,6 +238,7 @@ class ExtractedParams:
     history: List[PromptHistoryMessage]
     file_state: Dict[str, str] | None
     option_codes: List[str]
+    session_id: str | None
 
 
 class ParameterExtractionStage:
@@ -322,6 +325,15 @@ class ParameterExtractionStage:
                 else:
                     option_codes.append(str(entry))
 
+        session_id: str | None = None
+        if params.get("sessionId") is not None:
+            raw_session_id = params.get("sessionId")
+            if isinstance(raw_session_id, str) and raw_session_id.strip():
+                session_id = raw_session_id.strip()
+            else:
+                await self.throw_error("Invalid sessionId provided.")
+                raise ValueError("Invalid sessionId provided.")
+
         return ExtractedParams(
             stack=validated_stack,
             input_mode=validated_input_mode,
@@ -335,6 +347,7 @@ class ParameterExtractionStage:
             history=history,
             file_state=file_state,
             option_codes=option_codes,
+            session_id=session_id,
         )
 
     def _get_from_settings_dialog_or_env(
@@ -768,6 +781,14 @@ class CodeGenerationMiddleware(Middleware):
                 else:
                     context.completions.append("")
 
+            if context.extracted_params.session_id:
+                await record_variants_for_session(
+                    context.extracted_params.session_id,
+                    context.variant_models,
+                    context.variant_completions,
+                    context.extracted_params,
+                )
+
         except Exception as e:
             print(f"[GENERATE_CODE] Unexpected error: {e}")
             await context.throw_error(f"An unexpected error occurred: {str(e)}")
@@ -788,6 +809,44 @@ class PostProcessingMiddleware(Middleware):
         )
 
         await next_func()
+
+
+async def record_variants_for_session(
+    session_id: str,
+    variant_models: List[Llm],
+    variant_completions: Dict[int, str],
+    extracted_params: ExtractedParams,
+) -> None:
+    """Persist generated variants to a session, ignoring errors to keep UX smooth."""
+    metadata_base: Dict[str, Any] = {
+        "stack": extracted_params.stack,
+        "inputMode": extracted_params.input_mode,
+        "generationType": extracted_params.generation_type,
+        "optionCodes": extracted_params.option_codes,
+        "hasImages": bool(extracted_params.prompt.get("images")),
+        "hasVideos": bool(extracted_params.prompt.get("videos")),
+    }
+    for index, model in enumerate(variant_models):
+        completion = variant_completions.get(index)
+        if not completion:
+            continue
+        try:
+            await session_service.add_variant(
+                session_id,
+                variant_index=index,
+                model=model.value,
+                code=completion,
+                status=VariantStatus.COMPLETE,
+                metadata=metadata_base,
+            )
+        except SessionNotFoundError:
+            print(
+                f"[SESSION] Session {session_id} not found while recording variants; skipping."
+            )
+            return
+        except Exception as error:
+            print(f"[SESSION] Failed to record variant {index}: {error}")
+            return
 
 
 @router.websocket("/generate-code")

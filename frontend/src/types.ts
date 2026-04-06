@@ -65,6 +65,7 @@ export interface CodeGenerationParams {
   generationType: "create" | "update";
   inputMode: "image" | "video" | "text";
   prompt: PromptContent;
+  sessionId?: string;
   history?: PromptHistoryMessage[];
   fileState?: {
     path: string;
