@@ -1,0 +1,20 @@
+{
+  "name": "vuhl-ui-forge",
+  "private": true,
+  "version": "0.0.0",
+  "description": "VuhluiForge app-side workspace preserving a customized local fork of screenshot-to-code.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sethswango/vuhl-ui-forge.git"
+  },
+  "scripts": {
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "cd frontend && yarn test",
+    "test:backend": "cd backend && poetry run pytest"
+  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ]
+}
