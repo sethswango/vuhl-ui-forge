@@ -1,86 +1,106 @@
 # VuhluiForge
 
-`VuhluiForge` is Seth Swango's preserved local fork of the `abi/screenshot-to-code` project.
+VuhluiForge is a unified design-to-code workbench built from the open-source [`abi/screenshot-to-code`](https://github.com/abi/screenshot-to-code) engine and extended for project-aware workflows.
 
-This repo is the app-side half of the broader VuhluiForge effort:
+Instead of treating "screenshot to code" as the product name, this repo positions that capability as one engine inside a broader toolchain:
 
-- `C:\dev\Screenshot-To-Code` preserves the open-source app fork and local adjustments.
-- `C:\dev\Screenshot-To-Code-MCP` is the MCP-oriented companion project for context-aware IDE workflows and Angular-oriented generation.
+- screenshot and mockup generation
+- text and recording-based generation
+- iterative edit flows
+- future MCP and IDE-driven workflows
+- codebase-aware Angular and component integration
 
-## Current Local State
+## What This Repo Contains
 
-This local copy is intentionally preserved as-is because it contains local adjustments and project framing that should not be discarded.
+This repo is now the canonical home for the VuhluiForge codebase.
 
-At the moment, the checked-in files are a lightweight shell around the original app:
+Top-level structure:
 
-- root-level repo metadata and package manifests
-- Docker and workspace configuration
-- agent guidance in `CLAUDE.md`
-- historical planning/testing notes that have now been consolidated into this README
+- `frontend/` - React/Vite application
+- `backend/` - FastAPI backend and model/provider pipeline
+- `mcp/` - VuhluiForge MCP package and project-aware workflow layer
 
-The upstream app's `frontend/` and `backend/` source directories are not currently present in this local snapshot, so the repo should be treated as a preserved fork shell until the source tree is rehydrated or synced back in.
+## Supported Output Stacks
 
-## Relationship To Upstream
+- HTML + Tailwind
+- HTML + CSS
+- React + Tailwind
+- Vue + Tailwind
+- Bootstrap
+- Ionic + Tailwind
+- SVG
 
-- Upstream project: [`abi/screenshot-to-code`](https://github.com/abi/screenshot-to-code)
-- Local role: preserve customizations, naming, and project context for VuhluiForge
-- Future sync model: keep an `upstream` remote pointing at `abi/screenshot-to-code` so upstream changes can be reviewed and pulled in deliberately
+## Supported Models
 
-## Repo Scope
+- Gemini 3 Flash and Pro
+- Claude Opus 4.5
+- GPT-5.3, GPT-5.2, GPT-4.1
+- Other configured providers as supported by the backend
+- DALL-E 3 or Flux Schnell for image generation
 
-This repo is for the app/fork side of VuhluiForge, not the MCP server.
+## Getting Started
 
-Use this repo for:
+The app has a React/Vite frontend and a FastAPI backend.
 
-- upstream app tracking
-- local fork-specific adjustments
-- preserving configuration and package metadata for the app side
+Required API keys:
 
-Use the MCP repo for:
+- OpenAI, Anthropic, or Gemini
+- multiple keys are recommended if you want to compare model outputs
 
-- context-aware generation workflows
-- MCP transport and tool design
-- Angular-aware design-to-code integration ideas
-
-## Tooling Notes
-
-The original app architecture is a React/Vite frontend plus a FastAPI backend, with Docker support and npm workspace orchestration at the root. The current root manifest still reflects that structure so the source tree can be restored without redefining the workspace.
-
-Existing root scripts:
+Backend:
 
 ```bash
-npm run test
-npm run test:frontend
-npm run test:backend
+cd backend
+echo "OPENAI_API_KEY=sk-your-key" > .env
+echo "ANTHROPIC_API_KEY=your-key" >> .env
+echo "GEMINI_API_KEY=your-key" >> .env
+poetry install
+poetry env activate
+poetry run uvicorn main:app --reload --port 7001
 ```
 
-These scripts assume `frontend/` and `backend/` are present.
+Frontend:
 
-## Historical Notes Consolidated Here
+```bash
+cd frontend
+yarn
+yarn dev
+```
 
-The old repo-local docs have been folded into this README to keep the repository documentation lean:
+Open `http://localhost:5173` to use the app.
 
-- testing guidance referred to backend `pytest` and frontend workspace tests
-- evaluation notes described a screenshot-based eval flow under `backend/evals_data`
-- troubleshooting mostly pointed back to upstream OpenAI/account setup
-- planning notes described non-blocking variant generation in the original app
+If you prefer a different backend port, update `VITE_WS_BACKEND_URL` in `frontend/.env.local`.
 
-Those details now belong either in:
+## Docker
 
-- upstream `screenshot-to-code` documentation
-- the VuhluiForge MCP repo
-- or the Obsidian project notes for durable local context
+```bash
+echo "OPENAI_API_KEY=sk-your-key" > .env
+docker-compose up -d --build
+```
 
-## Publishing
+## MCP Direction
 
-Expected personal GitHub repo:
+The `mcp/` area is where VuhluiForge adds project-aware workflows on top of the core design-to-code engine.
 
-- `https://github.com/sethswango/vuhl-ui-forge`
+The goal is not just generating code from an image, but generating code that fits an existing codebase by incorporating:
 
-This repo is intentionally separate from the MCP publication target.
+- Angular version and conventions
+- selector prefixes
+- shared components
+- service availability
+- CSS variables and design tokens
+- feature-specific integration context
+
+## Upstream Relationship
+
+- Canonical local/personal repo: `https://github.com/sethswango/vuhl-ui-forge`
+- Upstream engine: `https://github.com/abi/screenshot-to-code`
+- Work remote currently used for MCP-oriented sharing: `https://github.com/vu-pdt/VUHL-UI-Forge-MCP`
+
+The intent is to keep pulling ideas and improvements from upstream while evolving VuhluiForge toward project-aware implementation workflows.
 
 ## Related Docs
 
-- `C:\dev\Screenshot-To-Code-MCP\README.md`
 - `C:\dev\Obsidian_Notes\VU-Obsidian\Projects\VUHL UI Forge\VUHL UI Forge Status.md`
 - `C:\dev\Obsidian_Notes\VU-Obsidian\Projects\screenshot-to-code\screenshot-to-code.md`
+- `C:\dev\Obsidian_Notes\VU-Obsidian\Projects\screenshot-to-code-mcp\screenshot-to-code-mcp.md`

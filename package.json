@@ -2,7 +2,7 @@
   "name": "vuhl-ui-forge",
   "private": true,
   "version": "0.0.0",
-  "description": "VuhluiForge app-side workspace preserving a customized local fork of screenshot-to-code.",
+  "description": "VuhluiForge unified design-to-code workbench built on the screenshot-to-code engine with project-aware extensions.",
   "type": "module",
   "repository": {
     "type": "git",
