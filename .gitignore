@@ -5,6 +5,7 @@ node_modules
 
 # Run logs
 backend/run_logs/*
+backend/sessions/*.db
 
 # Weird Docker setup related files
 backend/backend/*
