@@ -2,56 +2,58 @@
 
 `VUHL UI Forge` (`vuhl-ui-forge`) is a unified design-to-code workbench built from the open-source [`abi/screenshot-to-code`](https://github.com/abi/screenshot-to-code) engine and extended for project-aware workflows.
 
-Instead of treating "screenshot to code" as the product name, this repo positions that capability as one engine inside a broader toolchain:
+The project is organized around a straightforward idea: fast visual generation is most useful when it stays interactive, streams continuously, and can absorb real context from the codebase it is meant to integrate with. The goal is not only to turn screenshots into code, but to turn visual intent into implementation-ready artifacts that can be reviewed in the browser and then handed back to an IDE agent for clean integration.
 
-- screenshot and mockup generation
-- text and recording-based generation
-- iterative edit flows
-- future MCP and IDE-driven workflows
-- codebase-aware Angular and component integration
+## Core Strengths
 
-## What This Repo Contains
+The strongest parts of the project today are:
 
-This repo is now the canonical home for the VuhluiForge codebase.
+- live, streaming multi-variant generation rather than one-shot blocking output
+- support for screenshots, text prompts, and recordings as design input
+- a browser-first review loop that makes fast comparison practical
+- a session-backed path for carrying context and results across browser and MCP workflows
+- a unified repo structure that keeps the standalone web app and MCP direction together
+- a clear upgrade path from generic generated markup toward context-aware, framework-aware integration
 
-Top-level structure:
+## Repo Layout
 
-- `frontend/` - React/Vite application
-- `backend/` - FastAPI backend and model/provider pipeline
-- `mcp/` - VuhluiForge MCP package and project-aware workflow layer
+This repo is the canonical home for `VUHL UI Forge`.
 
-## Two Ways To Use It
+- `frontend/` - React/Vite browser application
+- `backend/` - FastAPI generation engine, model/provider pipeline, and session APIs
+- `mcp/` - MCP-oriented package for session-aware orchestration on top of the existing browser app and backend
+
+## Primary Modes
 
 ### Standalone Web App
 
-Use the web app when you want a fast design-to-code workspace without needing an IDE-driven orchestration loop.
+Use the standalone web app when the goal is rapid visual drafting and iteration.
 
-Flow:
+Typical path:
 
-- open the web UI
-- provide a screenshot, text prompt, or recording
-- stream multiple variants live
-- inspect and iterate in the browser
+- open the browser UI
+- provide a screenshot, prompt, or recording
+- stream multiple variants
+- compare results visually
+- continue refining in the same loop
 
-This is the direct evolution of the upstream engine experience.
+This is the direct evolution of the upstream screenshot-to-code experience.
 
 ### MCP-Driven Workflow
 
-Use the MCP path when you want `Claude CLI`, `Codex CLI`, or `Cursor` to participate in a project-aware workflow.
+Use the MCP path when an IDE agent such as `Claude CLI`, `Codex CLI`, or `Cursor` should participate in the loop.
 
-Flow:
+Typical path:
 
 - an IDE agent gathers codebase context
 - the MCP creates a design session
-- the browser UI opens with context attached
-- the user reviews streamed variants and approves one
-- the approved result is exported back to the IDE agent as an integration package
+- the existing browser UI opens with that session attached
+- the user reviews streamed variants
+- an approved result is exported back to the IDE agent as structured output for integration
 
-This is the main VuhluiForge differentiator.
+The MCP path does **not** create a second browser application. It orchestrates the existing `frontend/` experience and uses backend session APIs as the shared source of truth.
 
-The MCP path does **not** introduce a second browser UI. It orchestrates the existing `frontend/` app by creating sessions and opening that same UI with session context attached.
-
-## Supported Output Stacks
+## Supported Generation Targets
 
 - HTML + Tailwind
 - HTML + CSS
@@ -66,8 +68,119 @@ The MCP path does **not** introduce a second browser UI. It orchestrates the exi
 - Gemini 3 Flash and Pro
 - Claude Opus 4.5
 - GPT-5.3, GPT-5.2, GPT-4.1
-- Other configured providers as supported by the backend
+- other configured providers supported by the backend
 - DALL-E 3 or Flux Schnell for image generation
+
+## Why The Streaming Architecture Matters
+
+The central architecture choice in `VUHL UI Forge` is the streaming feedback loop.
+
+Traditional UI drafting tends to degrade in a few ways:
+
+- static mockup handoff strips out implementation context
+- one-shot generation makes every iteration expensive
+- long blocking waits reduce comparison and refinement speed
+- the final output is often a dead-end artifact instead of something that can be integrated
+
+`VUHL UI Forge` addresses that by keeping the generation loop interactive:
+
+- variants arrive incrementally instead of only at the end
+- the user can review and compare while the system is still producing output
+- context can be gathered before generation rather than bolted on afterward
+- selected output can be preserved as a structured session result
+
+That is what makes the system more effective for high-fidelity, fast-turn UI work than a plain screenshot-to-markup tool.
+
+## Architecture Diagrams
+
+### Standalone Generation Flow
+
+```mermaid
+flowchart LR
+    A[Visual Input<br/>Screenshot / Text / Recording] --> B[Frontend UI]
+    B --> C[WebSocket Request]
+    C --> D[FastAPI Generation Pipeline]
+    D --> E[Prompt Construction]
+    E --> F[Model Variants]
+    F --> G[Streaming Responses]
+    G --> H[Variant Preview Grid]
+    H --> I[Refinement Loop]
+```
+
+### Session-Backed MCP Flow
+
+```mermaid
+flowchart LR
+    A[Claude CLI / Codex CLI / Cursor] --> B[Context Gathering]
+    B --> C[MCP Session Creation]
+    C --> D[Backend Session APIs]
+    D --> E[Existing Browser UI<br/>Opened With Session]
+    E --> F[Streaming Variant Generation]
+    F --> G[Variant Review + Selection]
+    G --> H[Session Export Payload]
+    H --> I[IDE Agent Integration]
+```
+
+### Context Ingestion Pipeline
+
+```mermaid
+flowchart TD
+    A[Target Repo Scan] --> B[Project Context]
+    A2[Feature Request / ACs] --> C[Feature Context]
+    A3[Image / Mockup / Recording] --> D[Visual Intent]
+    B --> E[Prompt Construction Layer]
+    C --> E
+    D --> E
+    E --> F[Variant Generation]
+    F --> G[Review + Selection]
+    G --> H[Export Package]
+```
+
+### Real-Time Review Loop
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Browser UI
+    participant API as Backend
+    participant Models as Model Variants
+
+    User->>UI: Submit screenshot / prompt / recording
+    UI->>API: Open generation stream
+    API->>Models: Build prompt and request variants
+    Models-->>API: Partial outputs
+    API-->>UI: Stream chunks and statuses
+    UI-->>User: Render live previews
+    User->>UI: Compare and choose best direction
+    UI->>API: Persist selected outcome
+```
+
+## Current MCP Surface
+
+The current MCP direction is session-oriented and built around the unified repo’s backend session APIs and existing browser interface.
+
+Current tool direction:
+
+- `start_design_session`
+- `provide_context`
+- `open_design_ui`
+- `get_design_results`
+- `list_design_sessions`
+- `select_design_variant`
+- `quick_design`
+
+These tools are intended to make the browser review loop accessible from an IDE-driven workflow rather than replace it.
+
+## In-Progress Goals
+
+The project is still actively moving toward a more complete context-aware integration model. Current goals in progress include:
+
+- real-time rendering and review workflows for Angular-oriented output
+- deeper context ingestion from target repositories
+- a seamless context methodology that carries project context, feature context, and visual intent into prompt construction
+- a browser + MCP dual workflow where the same underlying UI can serve both standalone users and IDE-driven sessions
+- export paths that return structured results suitable for agent-driven integration
+- continued adaptation of the local fork while selectively incorporating useful upstream improvements
 
 ## Getting Started
 
@@ -98,7 +211,7 @@ yarn
 yarn dev
 ```
 
-Open `http://localhost:5173` to use the app.
+Open `http://localhost:5173` to use the browser UI.
 
 If you prefer a different backend port, update `VITE_WS_BACKEND_URL` in `frontend/.env.local`.
 
@@ -109,110 +222,14 @@ echo "OPENAI_API_KEY=sk-your-key" > .env
 docker-compose up -d --build
 ```
 
-## MCP Direction
-
-The `mcp/` area is where `VUHL UI Forge` adds project-aware workflows on top of the core design-to-code engine.
-
-The goal is not just generating code from an image, but generating code that fits an existing codebase by incorporating:
-
-- Angular version and conventions
-- selector prefixes
-- shared components
-- service availability
-- CSS variables and design tokens
-- feature-specific integration context
-
-Current MCP tool direction in the unified repo:
-
-- `start_design_session`
-- `provide_context`
-- `open_design_ui`
-- `get_design_results`
-- `list_design_sessions`
-- `select_design_variant`
-- `quick_design`
-
-These tools are session-oriented wrappers around the unified repo's browser UI and backend session APIs.
-
-## Why The Streaming Loop Matters
-
-Traditional UI spec drafting is often slow and lossy:
-
-- static mockup handoff loses implementation context
-- one-shot generation forces long waits and brittle prompts
-- the final artifact is often a screenshot or vague spec instead of an integratable package
-
-`VUHL UI Forge` takes a different path:
-
-- variants stream live instead of arriving all at once
-- the user can compare options immediately
-- project context improves prompt quality before generation starts
-- the approved result can be handed back to an agent for clean integration
-
-That combination is what makes it better for high-fidelity UI work than a plain prompt-to-HTML tool.
-
-## System Diagrams
-
-### Standalone Generation Loop
-
-```mermaid
-flowchart LR
-    A[User Input<br/>Screenshot / Text / Recording] --> B[Frontend UI]
-    B --> C[WebSocket Request]
-    C --> D[FastAPI Generation Pipeline]
-    D --> E[Prompt Construction]
-    E --> F[Model Variants]
-    F --> G[Streaming Responses]
-    G --> H[Variant Preview Grid]
-    H --> I[Iterate / Refine]
-```
-
-### MCP-Assisted Approval Loop
-
-```mermaid
-flowchart LR
-    A[Claude CLI / Codex CLI / Cursor] --> B[Context Gathering]
-    B --> C[MCP Session Creation]
-    C --> D[Browser UI With Session]
-    D --> E[Streaming Variant Generation]
-    E --> F[User Review + Approval]
-    F --> G[Approved Development Package]
-    G --> H[IDE Agent Integration]
-    H --> I[Target Codebase Updated]
-```
-
-### Context-Aware Prompt Pipeline
-
-```mermaid
-flowchart TD
-    A[Target Repo Scan] --> B[Project Context]
-    A2[Feature Request / ACs] --> C[Feature Context]
-    A3[Image / Mockup / Recording] --> D[Visual Intent]
-    B --> E[Prompt Construction Layer]
-    C --> E
-    D --> E
-    E --> F[Variant Generation]
-    F --> G[Review + Selection]
-    G --> H[Export Package For Integration]
-```
-
-## Target Outcome
-
-The target end state is:
-
-- standalone web app remains useful on its own
-- MCP mode becomes the project-aware path for real implementation work
-- approved renders turn into structured integration packages instead of dead-end mockups
-- upstream engine improvements can still be pulled in without rebuilding the whole product
-
 ## Upstream Relationship
 
-- Upstream engine: `https://github.com/abi/screenshot-to-code`
+This repo is intended to remain compatible with continued learning from the upstream engine:
 
-The intent is to keep pulling ideas and improvements from upstream while evolving VuhluiForge toward project-aware implementation workflows.
+- upstream engine: `https://github.com/abi/screenshot-to-code`
 
-## Related Docs
+The long-term goal is to keep incorporating useful upstream improvements while evolving `VUHL UI Forge` toward context-aware, integration-ready workflows.
 
-- `C:\dev\Obsidian_Notes\VU-Obsidian\Projects\VUHL UI Forge\VUHL UI Forge Status.md`
-- `C:\dev\Obsidian_Notes\VU-Obsidian\Projects\screenshot-to-code\screenshot-to-code.md`
-- `C:\dev\Obsidian_Notes\VU-Obsidian\Projects\screenshot-to-code-mcp\screenshot-to-code-mcp.md`
+## License
+
+MIT
