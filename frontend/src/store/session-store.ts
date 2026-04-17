@@ -18,6 +18,7 @@ interface SessionStore {
   setContext: (context: SessionContext) => void;
   setError: (error: string) => void;
   clearSession: () => void;
+  adoptServerSession: (id: string, name?: string) => void;
 
   setApprovalPending: (variantIndex: number) => void;
   setApprovalDone: () => void;
@@ -44,6 +45,22 @@ export const useSessionStore = create<SessionStore>((set) => ({
       error: null,
       approvalStatus: "none",
       selectedVariantIndex: null,
+    }),
+  adoptServerSession: (id, name) =>
+    // Fired when the backend mints a session mid-generation. We set the
+    // store into a "ready" state with a minimal SessionContext so downstream
+    // features (project context panel, spec dialog, handoff) can key off
+    // ``sessionId`` immediately without waiting for a round-trip fetch.
+    // Existing session data is preserved — this path assumes the server
+    // only mints when the client had none.
+    set((state) => {
+      if (state.sessionId === id) return state;
+      return {
+        sessionId: id,
+        status: "ready",
+        context: { sessionId: id, ...(name ? { name } : {}) },
+        error: null,
+      };
     }),
   setApprovalPending: (variantIndex) =>
     set({ approvalStatus: "pending", selectedVariantIndex: variantIndex }),

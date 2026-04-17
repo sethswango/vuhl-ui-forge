@@ -32,7 +32,11 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from utils import print_prompt_preview
 from sessions.models import VariantStatus
-from sessions.service import SessionNotFoundError, session_service
+from sessions.service import (
+    SessionNotFoundError,
+    latest_project_context,
+    session_service,
+)
 
 # WebSocket message types
 MessageType = Literal[
@@ -48,8 +52,10 @@ MessageType = Literal[
     "assistant",
     "toolStart",
     "toolResult",
+    "session",
 ]
 from prompts.pipeline import build_prompt_messages
+from prompts.project_brief import build_project_brief
 from prompts.request_parsing import parse_prompt_content, parse_prompt_history
 from prompts.prompt_types import PromptHistoryMessage, Stack, UserTurnInput
 from agent.runner import Agent
@@ -466,6 +472,10 @@ class PromptCreationStage:
     ) -> List[ChatCompletionMessageParam]:
         """Create prompt messages"""
         try:
+            project_brief = await self._load_project_brief(
+                extracted_params.session_id
+            )
+
             prompt_messages = await build_prompt_messages(
                 stack=extracted_params.stack,
                 input_mode=extracted_params.input_mode,
@@ -474,6 +484,7 @@ class PromptCreationStage:
                 history=extracted_params.history,
                 file_state=extracted_params.file_state,
                 image_generation_enabled=extracted_params.should_generate_images,
+                project_brief=project_brief,
             )
             print_prompt_preview(prompt_messages)
 
@@ -483,6 +494,32 @@ class PromptCreationStage:
                 "Error assembling prompt. Contact support at support@picoapps.xyz"
             )
             raise
+
+    @staticmethod
+    async def _load_project_brief(session_id: str | None) -> str | None:
+        """Best-effort fetch of the session's project brief.
+
+        The brief is an optimization that aligns generated variants with the
+        target repo's existing patterns, not a correctness requirement. If
+        anything in this path fails — unknown session, store error, malformed
+        context payload — we silently fall back to the original prompt shape
+        so code generation continues to work. ``build_project_brief`` itself
+        returns ``None`` when the context lacks meaningful signal, so no brief
+        is better than a noisy "framework: unknown" header.
+        """
+        if not session_id:
+            return None
+        try:
+            bundle = await session_service.get_session(session_id)
+        except SessionNotFoundError:
+            return None
+        except Exception as error:
+            # Store errors are unexpected but should never break generation;
+            # log for operator visibility and continue without the brief.
+            print(f"[PROMPT] Failed to load session for project brief: {error}")
+            return None
+        context = latest_project_context(bundle)
+        return build_project_brief(context)
 
 
 class PostProcessingStage:
@@ -682,6 +719,26 @@ class ParameterExtractionMiddleware(Middleware):
         await next_func()
 
 
+class SessionEnsureMiddleware(Middleware):
+    """Mint a server-side session when the client didn't provide one.
+
+    Runs immediately after parameter extraction so that every later stage
+    (status broadcast, prompt creation, code generation, variant recording)
+    sees a stable ``session_id``. The session event is emitted before any
+    status messages so the frontend URL update happens first, which matters
+    when a user reloads or shares the tab mid-generation.
+    """
+
+    async def process(
+        self, context: PipelineContext, next_func: Callable[[], Awaitable[None]]
+    ) -> None:
+        assert context.extracted_params is not None
+        await ensure_session_for_params(
+            context.extracted_params, context.send_message
+        )
+        await next_func()
+
+
 class StatusBroadcastMiddleware(Middleware):
     """Sends initial status messages to all variants"""
 
@@ -808,6 +865,85 @@ class PostProcessingMiddleware(Middleware):
         await next_func()
 
 
+_AUTO_SESSION_NAME_FALLBACK = "Untitled design"
+_AUTO_SESSION_NAME_MAX_LEN = 60
+
+
+def _derive_session_name(extracted_params: ExtractedParams) -> str:
+    """Pick a short, human-friendly session name from the user's turn.
+
+    Prefers the first line of the prompt text. Falls back to a stable
+    placeholder when the turn is media-only (image/video without text)
+    so the sidebar never renders a blank entry.
+    """
+    raw_text = (extracted_params.prompt.get("text") or "").strip()
+    if not raw_text:
+        return _AUTO_SESSION_NAME_FALLBACK
+    first_line = raw_text.splitlines()[0].strip()
+    if not first_line:
+        return _AUTO_SESSION_NAME_FALLBACK
+    if len(first_line) <= _AUTO_SESSION_NAME_MAX_LEN:
+        return first_line
+    # Hard truncate with an ellipsis; the sidebar shows the full name on hover.
+    return first_line[: _AUTO_SESSION_NAME_MAX_LEN - 1].rstrip() + "…"
+
+
+async def ensure_session_for_params(
+    extracted_params: ExtractedParams,
+    send_message: Callable[..., Awaitable[None]],
+) -> str | None:
+    """Guarantee ``extracted_params`` has a session and tell the frontend.
+
+    When the client opens the WebSocket with no ``sessionId``, we mint one
+    server-side so every downstream feature — project context, design spec,
+    implementer handoff — is available by default. The frontend receives the
+    new ID in a single ``session`` event before any generation output and
+    uses ``history.replaceState`` to propagate it into the URL, giving the
+    tab a shareable/reloadable identity without a disruptive navigation.
+
+    Existing sessions (explicit ``sessionId`` in params) flow through
+    untouched; we never mint a second session for the same turn.
+
+    Session creation is best-effort: if the store errors (disk full,
+    schema mismatch), we log, drop the auto-session, and let generation
+    proceed. The downstream recording step already tolerates a missing
+    session, so generation never fails because of session plumbing.
+    """
+    if extracted_params.session_id:
+        return extracted_params.session_id
+    try:
+        bundle = await session_service.create_session(
+            name=_derive_session_name(extracted_params),
+            stack=extracted_params.stack,
+            input_mode=extracted_params.input_mode,
+            metadata={
+                "auto_created": True,
+                "generationType": extracted_params.generation_type,
+                "optionCodes": extracted_params.option_codes,
+                "hasImages": bool(extracted_params.prompt.get("images")),
+                "hasVideos": bool(extracted_params.prompt.get("videos")),
+            },
+        )
+    except Exception as error:
+        print(f"[SESSION] Auto-session creation failed: {error}")
+        return None
+    session_id = bundle.session.id
+    extracted_params.session_id = session_id
+    try:
+        await send_message(
+            "session",
+            session_id,
+            0,
+            {"auto_created": True, "name": bundle.session.name},
+            None,
+        )
+    except Exception as error:
+        # Emitting the event is important for URL propagation, but a failure
+        # here (socket already closed, etc.) should not abort generation.
+        print(f"[SESSION] Failed to emit session event: {error}")
+    return session_id
+
+
 async def record_variants_for_session(
     session_id: str,
     variant_models: List[Llm],
@@ -854,6 +990,7 @@ async def stream_code(websocket: WebSocket):
     # Configure the pipeline
     pipeline.use(WebSocketSetupMiddleware())
     pipeline.use(ParameterExtractionMiddleware())
+    pipeline.use(SessionEnsureMiddleware())
     pipeline.use(StatusBroadcastMiddleware())
     pipeline.use(PromptCreationMiddleware())
     pipeline.use(CodeGenerationMiddleware())

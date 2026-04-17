@@ -116,7 +116,11 @@ function App() {
     settings.generatedCodeConfig === Stack.HTML_CSS;
 
   // Session awareness: read session ID from URL, load context if available
-  const { sessionId, context: sessionContext } = useSession();
+  const {
+    sessionId,
+    context: sessionContext,
+    adoptSessionFromServer,
+  } = useSession();
 
   // Indicate coding state using the browser tab's favicon and title
   useBrowserTabIndicator(appState === AppState.CODING);
@@ -433,6 +437,12 @@ function App() {
       },
       onVariantModels: (models) => {
         setVariantModels(commit.hash, models);
+      },
+      onSession: (serverSessionId, meta) => {
+        // Backend auto-minted a session for this turn. Adopt it now so the
+        // URL reflects the live session before any code renders, and so the
+        // spec/handoff/project-context features light up immediately.
+        adoptSessionFromServer(serverSessionId, meta);
       },
       onThinking: (content, variantIndex, eventId) => {
         if (!eventId) return;

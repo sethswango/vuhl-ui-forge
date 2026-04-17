@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import uuid4
 
 from .models import (
@@ -13,6 +13,34 @@ from .models import (
     VariantStatus,
 )
 from .store import SessionStore
+
+if TYPE_CHECKING:
+    from context.models import ProjectContext
+
+
+def latest_project_context(bundle: SessionBundle) -> "ProjectContext | None":
+    """Return the most recent project context captured on a session, if any.
+
+    Walks ``bundle.contexts`` newest-first looking for ``context_type="project"``
+    records and returns a validated :class:`ProjectContext` for the first one
+    that parses. Silently skips malformed payloads so a single corrupt record
+    never hides a later healthy one. Import is lazy to keep the sessions
+    package independent of the context package at module import time (keeps
+    circular-import surface small even though there isn't one today).
+    """
+    from context.models import ProjectContext
+
+    for record in reversed(bundle.contexts):
+        if record.context_type != "project":
+            continue
+        raw = record.payload.get("project_context")
+        if not isinstance(raw, dict):
+            continue
+        try:
+            return ProjectContext.model_validate(raw)
+        except Exception:
+            continue
+    return None
 
 
 class SessionNotFoundError(Exception):

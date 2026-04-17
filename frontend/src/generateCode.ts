@@ -25,6 +25,11 @@ type VariantModelsData = {
   models?: string[];
 };
 
+export type SessionEventData = {
+  auto_created?: boolean;
+  name?: string;
+};
+
 type WebSocketResponse = {
   type:
     | "chunk"
@@ -38,9 +43,10 @@ type WebSocketResponse = {
     | "thinking"
     | "assistant"
     | "toolStart"
-    | "toolResult";
+    | "toolResult"
+    | "session";
   value?: string;
-  data?: ToolStartData | ToolResultData | VariantModelsData;
+  data?: ToolStartData | ToolResultData | VariantModelsData | SessionEventData;
   eventId?: string;
   variantIndex: number;
 };
@@ -53,6 +59,7 @@ interface CodeGenerationCallbacks {
   onVariantError: (variantIndex: number, error: string) => void;
   onVariantCount: (count: number) => void;
   onVariantModels: (models: string[]) => void;
+  onSession?: (sessionId: string, meta?: SessionEventData) => void;
   onThinking: (content: string, variantIndex: number, eventId?: string) => void;
   onAssistant: (content: string, variantIndex: number, eventId?: string) => void;
   onToolStart: (
@@ -104,6 +111,14 @@ export function generateCode(
     } else if (response.type === "variantModels") {
       const modelsData = response.data as VariantModelsData | undefined;
       callbacks.onVariantModels(modelsData?.models || []);
+    } else if (response.type === "session") {
+      const sessionId = response.value || "";
+      if (sessionId && callbacks.onSession) {
+        callbacks.onSession(
+          sessionId,
+          response.data as SessionEventData | undefined
+        );
+      }
     } else if (response.type === "thinking") {
       callbacks.onThinking(response.value || "", response.variantIndex, response.eventId);
     } else if (response.type === "assistant") {

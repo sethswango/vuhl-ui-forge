@@ -23,7 +23,12 @@ from sessions.schemas import (
     SessionsListResponse,
     UpdateSessionRequest,
 )
-from sessions.service import SessionNotFoundError, SessionService, session_service
+from sessions.service import (
+    SessionNotFoundError,
+    SessionService,
+    latest_project_context,
+    session_service,
+)
 from spec import extract_design_spec
 
 
@@ -280,17 +285,10 @@ def _pick_variant(
 
 
 def _latest_project_context(bundle: SessionBundle) -> ProjectContext | None:
-    for record in reversed(bundle.contexts):
-        if record.context_type != "project":
-            continue
-        raw = record.payload.get("project_context")
-        if not isinstance(raw, dict):
-            continue
-        try:
-            return ProjectContext.model_validate(raw)
-        except Exception:
-            continue
-    return None
+    """Deprecated wrapper retained for in-file call sites; prefer the shared
+    :func:`sessions.service.latest_project_context` helper.
+    """
+    return latest_project_context(bundle)
 
 
 @router.post(

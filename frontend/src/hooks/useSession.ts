@@ -1,10 +1,10 @@
 import { useCallback, useEffect } from "react";
 import { useSessionStore } from "../store/session-store";
 import { fetchSessionContext, selectSessionVariant } from "../lib/session-api";
+import { readSessionFromUrl, writeSessionToUrl } from "../lib/session-url";
 
 function getSessionIdFromUrl(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("session");
+  return readSessionFromUrl();
 }
 
 export function useSession() {
@@ -22,6 +22,7 @@ export function useSession() {
     setApprovalPending,
     setApprovalDone,
     setApprovalError,
+    adoptServerSession,
   } = useSessionStore();
 
   useEffect(() => {
@@ -75,6 +76,19 @@ export function useSession() {
     [sessionId, setApprovalPending, setApprovalDone, setApprovalError]
   );
 
+  const adoptSessionFromServer = useCallback(
+    (id: string, meta?: { name?: string }) => {
+      // Mutation order matters: update the store first so any React subtree
+      // re-reading ``sessionId`` (spec dialog, project panel, handoff button)
+      // immediately sees the live session. URL sync follows — it's a
+      // side-effect that only needs to happen once, and doesn't gate
+      // downstream state.
+      adoptServerSession(id, meta?.name);
+      writeSessionToUrl(id);
+    },
+    [adoptServerSession]
+  );
+
   return {
     sessionId,
     status,
@@ -84,5 +98,6 @@ export function useSession() {
     selectedVariantIndex,
     isSessionActive: sessionId !== null,
     approveVariant,
+    adoptSessionFromServer,
   };
 }
