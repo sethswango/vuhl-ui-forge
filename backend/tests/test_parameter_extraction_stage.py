@@ -53,3 +53,86 @@ async def test_extracts_session_id_when_provided() -> None:
     )
 
     assert extracted.session_id == "session-123"
+
+
+@pytest.mark.asyncio
+async def test_model_preset_defaults_to_none_when_absent() -> None:
+    """Absent ``modelPreset`` must stay ``None`` so downstream logic can
+    distinguish "user hasn't picked" from "user explicitly chose balanced".
+    """
+    stage = ParameterExtractionStage(AsyncMock())
+
+    extracted = await stage.extract_and_validate(
+        {
+            "generatedCodeConfig": "html_tailwind",
+            "inputMode": "text",
+            "prompt": {"text": "hello"},
+        }
+    )
+
+    assert extracted.model_preset is None
+
+
+@pytest.mark.asyncio
+async def test_model_preset_accepts_known_values() -> None:
+    stage = ParameterExtractionStage(AsyncMock())
+
+    for preset in ("balanced", "fast", "quality", "diverse"):
+        extracted = await stage.extract_and_validate(
+            {
+                "generatedCodeConfig": "html_tailwind",
+                "inputMode": "text",
+                "prompt": {"text": "hello"},
+                "modelPreset": preset,
+            }
+        )
+        assert extracted.model_preset == preset, (
+            f"Expected known preset {preset!r} to be accepted"
+        )
+
+
+@pytest.mark.asyncio
+async def test_model_preset_ignores_unknown_values() -> None:
+    """Unknown preset strings are dropped (not errored) so a stale client
+    or typo never takes down a generation request."""
+    stage = ParameterExtractionStage(AsyncMock())
+
+    extracted = await stage.extract_and_validate(
+        {
+            "generatedCodeConfig": "html_tailwind",
+            "inputMode": "text",
+            "prompt": {"text": "hello"},
+            "modelPreset": "legendary",
+        }
+    )
+
+    assert extracted.model_preset is None
+
+
+@pytest.mark.asyncio
+async def test_model_preset_ignores_non_string_values() -> None:
+    """Defensive coverage for unexpected payload shapes — integers,
+    objects, ``None``, and empty strings all collapse to ``None``."""
+    stage = ParameterExtractionStage(AsyncMock())
+
+    bad_values: list[object] = [
+        0,
+        42,
+        None,
+        "",
+        "   ",
+        {"preset": "fast"},
+        ["fast"],
+    ]
+    for bad_value in bad_values:
+        extracted = await stage.extract_and_validate(
+            {
+                "generatedCodeConfig": "html_tailwind",
+                "inputMode": "text",
+                "prompt": {"text": "hello"},
+                "modelPreset": bad_value,
+            }
+        )
+        assert extracted.model_preset is None, (
+            f"Non-string preset {bad_value!r} should collapse to None"
+        )

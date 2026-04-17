@@ -64,12 +64,15 @@ from routes.model_choice_sets import (
     ALL_KEYS_MODELS_TEXT_CREATE,
     ALL_KEYS_MODELS_UPDATE,
     ANTHROPIC_ONLY_MODELS,
+    DEFAULT_MODEL_PRESET,
     GEMINI_ANTHROPIC_MODELS,
-    GEMINI_OPENAI_MODELS,
     GEMINI_ONLY_MODELS,
+    GEMINI_OPENAI_MODELS,
     OPENAI_ANTHROPIC_MODELS,
     OPENAI_ONLY_MODELS,
     VIDEO_VARIANT_MODELS,
+    is_known_preset,
+    resolve_preset_models,
 )
 
 # from utils import pprint_prompt
@@ -242,6 +245,11 @@ class ExtractedParams:
     file_state: Dict[str, str] | None
     option_codes: List[str]
     session_id: str | None
+    # Preferred model slate for the 4-variant create grid. Stored as a
+    # preset key (see ``MODEL_PRESETS``); ``None`` means "use defaults".
+    # Ignored for updates (which are intentionally fast / cheap) and for
+    # video mode (which must use Gemini).
+    model_preset: str | None = None
 
 
 class ParameterExtractionStage:
@@ -337,6 +345,22 @@ class ParameterExtractionStage:
                 await self.throw_error("Invalid sessionId provided.")
                 raise ValueError("Invalid sessionId provided.")
 
+        # Model preset is a soft input: unknown or missing values fall back
+        # to the default slate rather than erroring. Clients have their own
+        # validation, but the server should never take down a generation
+        # request over a typo in a UI preference.
+        raw_model_preset = params.get("modelPreset")
+        model_preset: str | None = None
+        if isinstance(raw_model_preset, str) and raw_model_preset.strip():
+            candidate = raw_model_preset.strip()
+            if is_known_preset(candidate):
+                model_preset = candidate
+            else:
+                print(
+                    f"Ignoring unknown modelPreset={candidate!r}; "
+                    f"falling back to {DEFAULT_MODEL_PRESET}"
+                )
+
         return ExtractedParams(
             stack=validated_stack,
             input_mode=validated_input_mode,
@@ -351,6 +375,7 @@ class ParameterExtractionStage:
             file_state=file_state,
             option_codes=option_codes,
             session_id=session_id,
+            model_preset=model_preset,
         )
 
     def _get_from_settings_dialog_or_env(
@@ -382,6 +407,7 @@ class ModelSelectionStage:
         openai_api_key: str | None,
         anthropic_api_key: str | None,
         gemini_api_key: str | None = None,
+        model_preset: str | None = None,
     ) -> List[Llm]:
         """Select appropriate models based on available API keys"""
         try:
@@ -393,6 +419,7 @@ class ModelSelectionStage:
                 openai_api_key,
                 anthropic_api_key,
                 gemini_api_key,
+                model_preset,
             )
 
             # Print the variant models (one per line)
@@ -417,6 +444,7 @@ class ModelSelectionStage:
         openai_api_key: str | None,
         anthropic_api_key: str | None,
         gemini_api_key: str | None,
+        model_preset: str | None = None,
     ) -> List[Llm]:
         """Simple model cycling that scales with num_variants"""
 
@@ -428,6 +456,18 @@ class ModelSelectionStage:
                     "Please add GEMINI_API_KEY to backend/.env or in the settings dialog"
                 )
             return list(VIDEO_VARIANT_MODELS)
+
+        # Presets only apply to the 4-variant create grid when the user has
+        # all three provider keys. Updates and partial-key setups use the
+        # legacy cycling logic so costs and behavior stay predictable.
+        have_all_keys = bool(gemini_api_key and anthropic_api_key and openai_api_key)
+        if (
+            have_all_keys
+            and generation_type == "create"
+            and model_preset
+            and model_preset != DEFAULT_MODEL_PRESET
+        ):
+            return list(resolve_preset_models(model_preset, num_variants))
 
         # Define models based on available API keys
         if gemini_api_key and anthropic_api_key and openai_api_key:
@@ -794,6 +834,7 @@ class CodeGenerationMiddleware(Middleware):
                 openai_api_key=context.extracted_params.openai_api_key,
                 anthropic_api_key=context.extracted_params.anthropic_api_key,
                 gemini_api_key=context.extracted_params.gemini_api_key,
+                model_preset=context.extracted_params.model_preset,
             )
             if IS_DEBUG_ENABLED:
                 await context.send_message(

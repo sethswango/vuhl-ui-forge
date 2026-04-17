@@ -10,7 +10,7 @@ import { USER_CLOSE_WEB_SOCKET_CODE } from "./constants";
 import toast from "react-hot-toast";
 import { nanoid } from "nanoid";
 import { Stack } from "./lib/stacks";
-import { CodeGenerationModel } from "./lib/models";
+import { CodeGenerationModel, DEFAULT_MODEL_PRESET } from "./lib/models";
 import useBrowserTabIndicator from "./hooks/useBrowserTabIndicator";
 import { useSession } from "./hooks/useSession";
 import { postSessionVariants, selectSessionVariant } from "./lib/session-api";
@@ -92,6 +92,7 @@ function App() {
       editorTheme: EditorTheme.COBALT,
       generatedCodeConfig: Stack.HTML_TAILWIND,
       codeGenerationModel: CodeGenerationModel.CLAUDE_4_5_OPUS_2025_11_01,
+      modelPreset: DEFAULT_MODEL_PRESET,
       // Only relevant for hosted version
       isTermOfServiceAccepted: false,
     },
@@ -136,6 +137,18 @@ function App() {
       }));
     }
   }, [settings.generatedCodeConfig, setSettings]);
+
+  // Migrate older persisted settings that pre-date ``modelPreset``.
+  // Without this, existing users would see their preset selector render as
+  // "unselected" after pulling the new frontend.
+  useEffect(() => {
+    if (!settings.modelPreset) {
+      setSettings((prev) => ({
+        ...prev,
+        modelPreset: DEFAULT_MODEL_PRESET,
+      }));
+    }
+  }, [settings.modelPreset, setSettings]);
 
   // Pre-populate settings from session context when available
   useEffect(() => {

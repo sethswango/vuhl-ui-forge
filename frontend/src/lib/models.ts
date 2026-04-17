@@ -1,3 +1,61 @@
+// Model preset keys — MUST match backend MODEL_PRESETS in
+// routes/model_choice_sets.py. The preset controls the 4-model slate
+// used for the create grid when the user has all three provider keys.
+// With partial keys the backend falls back to its key-subset logic.
+export type ModelPreset = "balanced" | "fast" | "quality" | "diverse";
+
+export const MODEL_PRESET_ORDER: readonly ModelPreset[] = [
+  "balanced",
+  "fast",
+  "quality",
+  "diverse",
+] as const;
+
+export const DEFAULT_MODEL_PRESET: ModelPreset = "balanced";
+
+export interface ModelPresetDescription {
+  label: string;
+  tagline: string;
+  detail: string;
+}
+
+export const MODEL_PRESET_DESCRIPTIONS: Record<
+  ModelPreset,
+  ModelPresetDescription
+> = {
+  balanced: {
+    label: "Balanced",
+    tagline: "Default mix",
+    detail:
+      "A curated mix of Gemini Flash, GPT-5, and Gemini Pro. Good speed, good variety — the safe default.",
+  },
+  fast: {
+    label: "Fast",
+    tagline: "Fastest iteration",
+    detail:
+      "All Gemini Flash. Cheapest and quickest — use when you want to explore lots of directions quickly.",
+  },
+  quality: {
+    label: "Quality",
+    tagline: "Best fidelity",
+    detail:
+      "Claude Opus, GPT-5 xhigh, Gemini Pro high. Slower and pricier, but the strongest single-shot designs.",
+  },
+  diverse: {
+    label: "Diverse",
+    tagline: "Maximum variance",
+    detail:
+      "One model from each provider. Maximizes stylistic spread when you want four genuinely different mockups.",
+  },
+};
+
+export function isModelPreset(value: unknown): value is ModelPreset {
+  return (
+    typeof value === "string" &&
+    (MODEL_PRESET_ORDER as readonly string[]).includes(value)
+  );
+}
+
 // Keep in sync with backend (llm.py)
 // Order here matches dropdown order
 export enum CodeGenerationModel {

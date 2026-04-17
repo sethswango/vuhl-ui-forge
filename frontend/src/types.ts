@@ -1,5 +1,5 @@
 import { Stack } from "./lib/stacks";
-import { CodeGenerationModel } from "./lib/models";
+import { CodeGenerationModel, ModelPreset } from "./lib/models";
 
 export enum EditorTheme {
   ESPRESSO = "espresso",
@@ -20,6 +20,11 @@ export interface Settings {
   editorTheme: EditorTheme;
   generatedCodeConfig: Stack;
   codeGenerationModel: CodeGenerationModel;
+  // Preferred 4-model slate for the create grid. The backend honors this
+  // when all three provider keys are present; with partial keys it falls
+  // back to its own key-subset logic so this stays a preference, not a
+  // hard requirement.
+  modelPreset: ModelPreset;
   // Only relevant for hosted version
   isTermOfServiceAccepted: boolean;
   anthropicApiKey: string | null;
