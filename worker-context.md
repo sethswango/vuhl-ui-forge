@@ -208,3 +208,71 @@ Total: **16 new tests, all passing**.
 - **Scanner is regex-based, not AST-based.** Intentional trade-off for self-containment and speed. Trade-offs documented in the module docstring; obvious misses (e.g. dynamic selectors assembled at runtime) fall back to the unknown bucket and don't crash the scan.
 - **No fingerprinting of framework minor versions beyond what `package.json` reports.** Angular 17 vs 18 vs 19 is reported as-is from the pinned/resolved version string; no heuristic "treat 16+ as signals-capable" override. The alignment notes already key off `patterns.uses_signals` which is detected directly from code (`input()`, `signal()`, `computed()` usage), not from the version.
 
+---
+
+## Round 5 plan — Implementer handoff bundle
+
+Vision anchor (verbatim from user): "there's this seamless, super fast way to take a screenshot mockup and turn it into a reality." The existing pipeline already covers screenshot + text → 4 variants → iterate → design spec. The last-mile gap is: the implementing agent (Claude / Codex) should receive a single self-contained document that bundles everything it needs — no glue work, no screen scraping, no guessing.
+
+Scope: frontend composition + MCP tool. No backend endpoint changes (the spec + context records already exist). No model picker yet (deferred — needs backend overrides on `/generate-code`).
+
+### Track F — Frontend implementer handoff
+
+Owns: `frontend/src/features/implementer-handoff/**`, small wire-up in `frontend/src/components/variants/Variants.tsx`.
+
+Deliverables:
+
+1. `features/implementer-handoff/composeHandoff.ts` — pure function `composeHandoff({ variantIndex, variantCode, variantModel, specResult, projectContextSummary, angularConversion })` that returns a single markdown document. Sections:
+   - Title + at-a-glance metadata (variant number, model, framework, generated-at).
+   - Summary + implementer goal (verbatim: "integrate this design into the existing project without regressing component reuse, design tokens, or framework idioms").
+   - Project context block (framework, state style, component count, token count, folder layout, naming conventions) — only when project context is available; otherwise a compact "No project scan attached; ask the user for it."
+   - Alignment notes (from `specResult.spec.alignmentNotes`, one bullet each).
+   - Reuse candidates (name, selector, file, confidence, rationale) — exactly as the backend emitted them.
+   - New components likely needed.
+   - Variant HTML (fenced `html` block).
+   - Optional Angular scaffold (`component.ts` / `component.html` / `component.scss` + follow-up notes) — only when the caller opts in (e.g. project framework is Angular or user explicitly clicks "bundle Angular").
+   - Implementer checklist: place files, reuse existing tokens/components, run lint + tests.
+2. `features/implementer-handoff/composeHandoff.test.ts` — Jest tests covering:
+   - no-project-context case (only spec + HTML).
+   - with-project-context case (Angular signals).
+   - includes alignmentNotes and reuseSuggestions.
+   - Angular scaffold section appears when `includeAngular=true` and disappears otherwise.
+   - follow-up notes surface under the Angular scaffold.
+3. `features/implementer-handoff/CopyForClaudeButton.tsx` — button that:
+   - reads spec, project context, variant code from store.
+   - composes the handoff markdown with `includeAngular` determined by detected framework (defaults to true when framework is `angular` or unknown, false otherwise).
+   - copies to clipboard AND offers a download button.
+   - shows toast confirmations.
+4. `components/variants/Variants.tsx` — mount `CopyForClaudeButton` next to the existing `DesignSpecTriggerButton` + `CopyAsAngularButton`.
+
+### Track M — MCP implementer handoff tool
+
+Owns: `mcp/src/server/tools.ts`, `mcp/src/server/tools.test.ts`.
+
+Deliverables:
+
+1. New MCP tool `prepare_implementer_handoff`:
+   - Schema: `{ sessionId: string, variantIndex?: number, variantId?: string, persistAsContext?: boolean }`.
+   - Calls `extractDesignSpec` (reuse existing client) and `getSessionExport` (to resolve the actual variant HTML).
+   - Returns structured content: `{ sessionId, variantIndex, variantId, spec, annotatedMarkdown, variantCode, variantModel, projectContextSummary, implementerPrompt }`, where `implementerPrompt` is a server-composed markdown string mirroring the frontend shape (minus the Angular scaffold — the Python side does not re-implement the angular converter; it notes "run the in-UI Angular conversion if your target is Angular").
+   - One-sentence text response for the content channel: `"Prepared implementer handoff for session {sessionId}, variant {variantIndex} (N chars)."`.
+2. Tests:
+   - Add `"prepare_implementer_handoff"` to `EXPECTED_TOOL_NAMES`.
+   - Validation tests (missing variantIndex + variantId, missing sessionId, happy path).
+   - Handler test: stub both `/spec` and `/export` fetches, assert both URLs are hit and `implementerPrompt` includes the spec markdown + variant HTML marker.
+
+### Verification
+
+- `cd frontend && corepack yarn test --runInBand` — should pick up ~5 new tests.
+- `cd frontend && corepack yarn tsc --noEmit` — must stay clean.
+- `cd frontend && corepack yarn lint` — must stay clean.
+- `cd backend && poetry run pytest` — no backend changes; still 140 passing.
+- `cd mcp && yarn tsc --noEmit -p tsconfig.server.json` — must stay clean.
+- `cd mcp && node --import tsx --test src/server/tools.test.ts` — tool count rises from 10 to 11.
+
+### Off-limits boundaries
+
+- No backend endpoint additions. The spec + export endpoints already give us everything.
+- No changes to `/generate-code` WebSocket behaviour.
+- No duplication of the Angular converter in Python — the MCP handoff points at the in-UI converter in a note.
+- No changes to the Round 4 alignment-note logic. That surface is stable.

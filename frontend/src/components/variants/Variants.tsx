@@ -13,6 +13,7 @@ import { CopyAsAngularButton } from "../../features/angular-copy/CopyAsAngularBu
 import { useIterateStore } from "../../features/iterate/iterateStore";
 import { DesignSpecTriggerButton } from "../../features/design-spec/DesignSpecTriggerButton";
 import { DesignSpecDialog } from "../../features/design-spec/DesignSpecDialog";
+import { CopyForClaudeButton } from "../../features/implementer-handoff/CopyForClaudeButton";
 
 const IFRAME_WIDTH = 1280;
 const IFRAME_HEIGHT = 550;
@@ -226,6 +227,12 @@ function Variants() {
               variantIndex={selectedVariantIndex}
             />
             <CopyAsAngularButton code={selectedCode} />
+            <CopyForClaudeButton
+              commitHash={commit.hash}
+              variantIndex={selectedVariantIndex}
+              variantCode={selectedCode}
+              variantModel={selectedVariant?.model}
+            />
           </div>
           <IteratePane
             variantIndex={selectedVariantIndex}

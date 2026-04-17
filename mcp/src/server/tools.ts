@@ -358,6 +358,271 @@ const refineVariantTool: McpToolDefinition<{
   },
 };
 
+const prepareImplementerHandoffTool: McpToolDefinition<{
+  sessionId: z.ZodString;
+  variantIndex: z.ZodOptional<z.ZodNumber>;
+  variantId: z.ZodOptional<z.ZodString>;
+  persistAsContext: z.ZodOptional<z.ZodBoolean>;
+}> = {
+  name: "prepare_implementer_handoff",
+  description:
+    "Build a ready-to-paste implementer prompt for Claude/Codex/Cursor by bundling the variant HTML, the backend design spec, and any gathered project context into a single markdown document. The Angular scaffold is omitted here; run the in-UI Angular conversion in VUHL UI Forge when the target framework is Angular.",
+  schema: {
+    sessionId: z.string().min(1),
+    variantIndex: z.number().int().min(0).optional(),
+    variantId: z.string().min(1).optional(),
+    persistAsContext: z.boolean().optional(),
+  },
+  handler: async (
+    { sessionId, variantIndex, variantId, persistAsContext },
+    ctx
+  ) => {
+    if (variantIndex === undefined && variantId === undefined) {
+      throw new Error("variantId or variantIndex is required");
+    }
+    const [spec, exportPayload] = await Promise.all([
+      extractDesignSpec(sessionId, {
+        variantIndex,
+        variantId,
+        persistAsContext,
+      }),
+      getSessionExport(sessionId),
+    ]);
+
+    const targetVariant = selectVariantFromExport(exportPayload.variants, {
+      variantIndex: spec.variant_index,
+      variantId: spec.variant_id,
+    });
+    if (!targetVariant) {
+      throw new Error(
+        `Variant ${spec.variant_id} (#${spec.variant_index}) was not found in the session export.`
+      );
+    }
+
+    const projectContextPayload = findProjectContextPayload(
+      exportPayload.contexts
+    );
+    const projectContextSummary = summarizeProjectContext(
+      projectContextPayload
+    );
+
+    const implementerPrompt = composeMcpHandoffMarkdown({
+      variantIndex: spec.variant_index,
+      variantModel: targetVariant.model,
+      annotatedMarkdown: spec.annotated_markdown,
+      variantCode: targetVariant.code,
+      projectContextSummary,
+      uiUrl: ctx.getSessionUiUrl(sessionId),
+    });
+
+    return textResult(
+      `Prepared implementer handoff for session ${sessionId}, variant ${spec.variant_index} (${implementerPrompt.length} chars).`,
+      {
+        sessionId,
+        variantIndex: spec.variant_index,
+        variantId: spec.variant_id,
+        spec: spec.spec,
+        annotatedMarkdown: spec.annotated_markdown,
+        variantCode: targetVariant.code,
+        variantModel: targetVariant.model,
+        projectContextSummary,
+        implementerPrompt,
+        contextRecord: spec.context_record,
+      }
+    );
+  },
+};
+
+interface VariantLike {
+  id: string;
+  variant_index: number;
+  model: string;
+  code: string;
+}
+
+function selectVariantFromExport(
+  variants: readonly VariantLike[],
+  target: { variantIndex: number; variantId: string }
+): VariantLike | null {
+  const byId = variants.find((variant) => variant.id === target.variantId);
+  if (byId) return byId;
+  const byIndex = variants.find(
+    (variant) => variant.variant_index === target.variantIndex
+  );
+  return byIndex ?? null;
+}
+
+function findProjectContextPayload(
+  contexts: readonly { context_type: string; payload: Record<string, unknown> }[]
+): Record<string, unknown> | null {
+  for (let i = contexts.length - 1; i >= 0; i -= 1) {
+    const entry = contexts[i];
+    if (entry.context_type === "project") {
+      return entry.payload as Record<string, unknown>;
+    }
+  }
+  return null;
+}
+
+interface ProjectContextSummary {
+  framework: string;
+  componentCount: number;
+  tokenCount: number;
+  stateStyle: string | null;
+  repoPath: string | null;
+}
+
+function summarizeProjectContext(
+  payload: Record<string, unknown> | null
+): ProjectContextSummary | null {
+  if (!payload) return null;
+  const project = (payload.project_context ?? payload) as Record<
+    string,
+    unknown
+  >;
+  const framework = (project.framework ?? {}) as {
+    name?: string;
+    version?: string | null;
+  };
+  const frameworkName = typeof framework.name === "string" ? framework.name : "unknown";
+  const frameworkVersion =
+    typeof framework.version === "string" && framework.version
+      ? ` ${framework.version}`
+      : "";
+  const components = Array.isArray(project.components) ? project.components : [];
+  const cssTokens = (project.css_tokens ?? {}) as {
+    tailwind_custom_classes?: unknown;
+    tailwind_theme_keys?: unknown;
+    css_custom_properties?: unknown;
+    scss_variables?: unknown;
+  };
+  const tokenCount =
+    countEntries(cssTokens.tailwind_custom_classes) +
+    countEntries(cssTokens.tailwind_theme_keys) +
+    countKeys(cssTokens.css_custom_properties) +
+    countKeys(cssTokens.scss_variables);
+  const patterns = (project.patterns ?? {}) as { state_style?: string | null };
+  const repoPath =
+    typeof project.repo_path === "string" ? project.repo_path : null;
+  return {
+    framework: `${frameworkName}${frameworkVersion}`,
+    componentCount: components.length,
+    tokenCount,
+    stateStyle:
+      typeof patterns.state_style === "string" ? patterns.state_style : null,
+    repoPath,
+  };
+}
+
+function countEntries(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function countKeys(value: unknown): number {
+  if (!value || typeof value !== "object") return 0;
+  return Object.keys(value as Record<string, unknown>).length;
+}
+
+function composeMcpHandoffMarkdown(input: {
+  variantIndex: number;
+  variantModel: string;
+  annotatedMarkdown: string;
+  variantCode: string;
+  projectContextSummary: ProjectContextSummary | null;
+  uiUrl: string;
+}): string {
+  const {
+    variantIndex,
+    variantModel,
+    annotatedMarkdown,
+    variantCode,
+    projectContextSummary,
+    uiUrl,
+  } = input;
+
+  const sections: string[] = [];
+  sections.push("# Implementer handoff");
+  sections.push(
+    [
+      "## At a glance",
+      "",
+      `- **Variant:** Option ${variantIndex + 1}`,
+      `- **Model:** ${variantModel || "unspecified"}`,
+      `- **Session UI:** ${uiUrl}`,
+      `- **Target framework:** ${
+        projectContextSummary?.framework ?? "not detected"
+      }`,
+    ].join("\n")
+  );
+
+  if (projectContextSummary) {
+    const projectLines = [
+      "## Project context",
+      "",
+      `- **Repo path:** ${
+        projectContextSummary.repoPath
+          ? `\`${projectContextSummary.repoPath}\``
+          : "(unspecified)"
+      }`,
+      `- **Framework:** ${projectContextSummary.framework}`,
+      `- **Reusable components discovered:** ${projectContextSummary.componentCount}`,
+      `- **Design tokens discovered:** ${projectContextSummary.tokenCount}`,
+    ];
+    if (projectContextSummary.stateStyle) {
+      projectLines.push(`- **State style:** ${projectContextSummary.stateStyle}`);
+    }
+    sections.push(projectLines.join("\n"));
+  } else {
+    sections.push(
+      [
+        "## Project context",
+        "",
+        "No project scan is attached to this session. Before implementing,",
+        "ask the user to run `gather_project_context` (or the project-context",
+        "scan in VUHL UI Forge) so the implementer can honour existing",
+        "components, tokens, and naming conventions.",
+      ].join("\n")
+    );
+  }
+
+  sections.push(
+    ["## Annotated design spec", "", annotatedMarkdown.trimEnd()].join("\n")
+  );
+
+  sections.push(
+    [
+      "## Selected variant HTML",
+      "",
+      "```html",
+      variantCode.trimEnd(),
+      "```",
+    ].join("\n")
+  );
+
+  sections.push(
+    [
+      "## Angular bridge",
+      "",
+      "This bundle intentionally omits the Angular scaffold. If the target is",
+      "Angular, open VUHL UI Forge for this session, click _Copy as Angular_",
+      "on the selected variant, and paste that output in place of the raw HTML.",
+    ].join("\n")
+  );
+
+  sections.push(
+    [
+      "## Implementer checklist",
+      "",
+      "- [ ] Place the new component files under the project's established folder layout.",
+      "- [ ] Reuse the suggested components verbatim when a high-confidence match exists.",
+      "- [ ] Bind colours, spacing, and typography to existing design tokens.",
+      "- [ ] Run the repo's linter, formatter, and tests before opening a pull request.",
+    ].join("\n")
+  );
+
+  return sections.join("\n\n").trimEnd() + "\n";
+}
+
 export const toolDefinitions: ReadonlyArray<McpToolDefinition<ZodRawShape>> = [
   startDesignSessionTool as unknown as McpToolDefinition<ZodRawShape>,
   provideContextTool as unknown as McpToolDefinition<ZodRawShape>,
@@ -369,6 +634,7 @@ export const toolDefinitions: ReadonlyArray<McpToolDefinition<ZodRawShape>> = [
   gatherProjectContextTool as unknown as McpToolDefinition<ZodRawShape>,
   extractDesignSpecTool as unknown as McpToolDefinition<ZodRawShape>,
   refineVariantTool as unknown as McpToolDefinition<ZodRawShape>,
+  prepareImplementerHandoffTool as unknown as McpToolDefinition<ZodRawShape>,
 ];
 
 export function validateToolArgs(

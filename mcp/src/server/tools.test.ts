@@ -14,6 +14,7 @@ const EXPECTED_TOOL_NAMES = [
   "gather_project_context",
   "extract_design_spec",
   "refine_variant",
+  "prepare_implementer_handoff",
 ];
 
 interface FetchCall {
@@ -239,6 +240,282 @@ describe("extract_design_spec handler", () => {
     assert.deepEqual(body, { variant_index: 1, persist_as_context: true });
     assert.equal(result.structuredContent?.variantIndex, 1);
     assert.equal(result.structuredContent?.annotatedMarkdown, "# Spec");
+  });
+});
+
+describe("prepare_implementer_handoff validation", () => {
+  it("registers the tool", () => {
+    const registered = toolDefinitions.map((tool) => tool.name);
+    assert.ok(registered.includes("prepare_implementer_handoff"));
+  });
+
+  it("accepts a variantIndex without variantId", () => {
+    const result = validateToolArgs("prepare_implementer_handoff", {
+      sessionId: "sess-1",
+      variantIndex: 0,
+    });
+    assert.equal(result.ok, true);
+  });
+
+  it("rejects when both variantIndex and variantId are missing", async () => {
+    const tool = findTool("prepare_implementer_handoff");
+    await assert.rejects(
+      () => tool.handler({ sessionId: "sess-1" }, testContext),
+      /variantId or variantIndex/i
+    );
+  });
+
+  it("rejects missing sessionId", () => {
+    const result = validateToolArgs("prepare_implementer_handoff", {
+      variantIndex: 0,
+    });
+    assert.equal(result.ok, false);
+  });
+
+  it("rejects a negative variantIndex", () => {
+    const result = validateToolArgs("prepare_implementer_handoff", {
+      sessionId: "sess-1",
+      variantIndex: -1,
+    });
+    assert.equal(result.ok, false);
+  });
+});
+
+describe("prepare_implementer_handoff handler", () => {
+  let stub: ReturnType<typeof installFetchStub>;
+
+  before(() => {
+    stub = installFetchStub((call) => {
+      if (call.url.endsWith("/sessions/sess-1/spec")) {
+        return {
+          body: {
+            session_id: "sess-1",
+            variant_index: 2,
+            variant_id: "var-3",
+            spec: {
+              summary: "Dashboard card",
+              alignment_notes: ["Reuse CardComponent"],
+              reuse_suggestions: [],
+              new_components_needed: [],
+              project_context_used: true,
+            },
+            annotated_markdown: "# Design Spec\n\nReuse CardComponent.",
+            context_record: null,
+          },
+        };
+      }
+      if (call.url.endsWith("/sessions/sess-1/export")) {
+        return {
+          body: {
+            session: {
+              id: "sess-1",
+              name: "test",
+              status: "active",
+              stack: null,
+              input_mode: null,
+              metadata: {},
+              selected_variant_id: null,
+              created_at: "2026-04-17T00:00:00Z",
+              updated_at: "2026-04-17T00:00:00Z",
+              last_context_at: null,
+              last_variant_at: null,
+            },
+            contexts: [
+              {
+                id: "ctx-1",
+                context_type: "project",
+                payload: {
+                  project_context: {
+                    repo_path: "C:/dev/target",
+                    framework: { name: "angular", version: "17.3.0" },
+                    components: [
+                      { name: "CardComponent" },
+                      { name: "ButtonComponent" },
+                    ],
+                    css_tokens: {
+                      tailwind_custom_classes: ["btn-primary"],
+                      tailwind_theme_keys: ["colors.brand"],
+                      css_custom_properties: { "--color-brand": "#6d28d9" },
+                      scss_variables: {},
+                    },
+                    patterns: { state_style: "signals" },
+                  },
+                },
+                created_at: "2026-04-17T00:00:00Z",
+              },
+            ],
+            variants: [
+              {
+                id: "var-1",
+                variant_index: 0,
+                model: "claude-sonnet-4",
+                code: "<div>v1</div>",
+                status: "complete",
+                metadata: {},
+                created_at: "2026-04-17T00:00:00Z",
+                updated_at: "2026-04-17T00:00:00Z",
+              },
+              {
+                id: "var-3",
+                variant_index: 2,
+                model: "gpt-5.4-medium",
+                code: "<section class='card'>Hello</section>",
+                status: "complete",
+                metadata: {},
+                created_at: "2026-04-17T00:00:00Z",
+                updated_at: "2026-04-17T00:00:00Z",
+              },
+            ],
+            selected_variant: null,
+          },
+        };
+      }
+      return { status: 404, body: { detail: "unexpected url" } };
+    });
+  });
+
+  after(() => stub.restore());
+
+  it("calls both /spec and /export and returns a composed implementer prompt", async () => {
+    const tool = findTool("prepare_implementer_handoff");
+    const result = await tool.handler(
+      { sessionId: "sess-1", variantIndex: 2, persistAsContext: true },
+      testContext
+    );
+
+    const urls = stub.calls.map((call) => call.url);
+    assert.ok(urls.some((url) => url.endsWith("/sessions/sess-1/spec")));
+    assert.ok(urls.some((url) => url.endsWith("/sessions/sess-1/export")));
+
+    const implementerPrompt = result.structuredContent
+      ?.implementerPrompt as string | undefined;
+    assert.ok(
+      implementerPrompt && implementerPrompt.length > 0,
+      "implementerPrompt should be present"
+    );
+    assert.ok(implementerPrompt!.startsWith("# Implementer handoff"));
+    assert.ok(implementerPrompt!.includes("**Variant:** Option 3"));
+    assert.ok(implementerPrompt!.includes("**Model:** gpt-5.4-medium"));
+    assert.ok(implementerPrompt!.includes("angular 17.3.0"));
+    assert.ok(implementerPrompt!.includes("**Reusable components discovered:** 2"));
+    assert.ok(implementerPrompt!.includes("**State style:** signals"));
+    assert.ok(implementerPrompt!.includes("## Annotated design spec"));
+    assert.ok(implementerPrompt!.includes("Reuse CardComponent."));
+    assert.ok(implementerPrompt!.includes("## Selected variant HTML"));
+    assert.ok(
+      implementerPrompt!.includes("<section class='card'>Hello</section>")
+    );
+    assert.ok(implementerPrompt!.includes("Copy as Angular"));
+
+    assert.equal(
+      result.structuredContent?.variantId,
+      "var-3",
+      "variantId should be surfaced verbatim"
+    );
+    assert.equal(result.structuredContent?.variantIndex, 2);
+    assert.equal(
+      result.structuredContent?.variantCode,
+      "<section class='card'>Hello</section>"
+    );
+    assert.equal(result.structuredContent?.variantModel, "gpt-5.4-medium");
+
+    const projectSummary = result.structuredContent
+      ?.projectContextSummary as
+      | {
+          framework?: string;
+          componentCount?: number;
+          tokenCount?: number;
+          stateStyle?: string | null;
+          repoPath?: string | null;
+        }
+      | null;
+    assert.ok(projectSummary);
+    assert.equal(projectSummary!.framework, "angular 17.3.0");
+    assert.equal(projectSummary!.componentCount, 2);
+    assert.equal(projectSummary!.tokenCount, 3);
+    assert.equal(projectSummary!.stateStyle, "signals");
+    assert.equal(projectSummary!.repoPath, "C:/dev/target");
+
+    assert.ok(
+      result.content[0]?.text.includes("variant 2"),
+      "text summary should reference the variant index"
+    );
+  });
+});
+
+describe("prepare_implementer_handoff without project context", () => {
+  let stub: ReturnType<typeof installFetchStub>;
+
+  before(() => {
+    stub = installFetchStub((call) => {
+      if (call.url.endsWith("/sessions/sess-2/spec")) {
+        return {
+          body: {
+            session_id: "sess-2",
+            variant_index: 0,
+            variant_id: "var-0",
+            spec: {
+              summary: "plain",
+              alignment_notes: [],
+              reuse_suggestions: [],
+              new_components_needed: [],
+              project_context_used: false,
+            },
+            annotated_markdown: "# plain spec",
+            context_record: null,
+          },
+        };
+      }
+      if (call.url.endsWith("/sessions/sess-2/export")) {
+        return {
+          body: {
+            session: {
+              id: "sess-2",
+              name: "test",
+              status: "active",
+              stack: null,
+              input_mode: null,
+              metadata: {},
+              selected_variant_id: null,
+              created_at: "2026-04-17T00:00:00Z",
+              updated_at: "2026-04-17T00:00:00Z",
+              last_context_at: null,
+              last_variant_at: null,
+            },
+            contexts: [],
+            variants: [
+              {
+                id: "var-0",
+                variant_index: 0,
+                model: "claude-opus-4",
+                code: "<div>hi</div>",
+                status: "complete",
+                metadata: {},
+                created_at: "2026-04-17T00:00:00Z",
+                updated_at: "2026-04-17T00:00:00Z",
+              },
+            ],
+            selected_variant: null,
+          },
+        };
+      }
+      return { status: 404, body: { detail: "unexpected url" } };
+    });
+  });
+
+  after(() => stub.restore());
+
+  it("surfaces a missing-scan hint in the implementer prompt", async () => {
+    const tool = findTool("prepare_implementer_handoff");
+    const result = await tool.handler(
+      { sessionId: "sess-2", variantIndex: 0 },
+      testContext
+    );
+    const implementerPrompt = result.structuredContent
+      ?.implementerPrompt as string;
+    assert.ok(implementerPrompt.includes("No project scan is attached"));
+    assert.ok(implementerPrompt.includes("gather_project_context"));
+    assert.equal(result.structuredContent?.projectContextSummary, null);
   });
 });
 
