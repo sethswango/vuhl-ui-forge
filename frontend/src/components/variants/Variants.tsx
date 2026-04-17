@@ -11,6 +11,8 @@ import { IteratePane } from "../../features/iterate/IteratePane";
 import { ModelSwitcher } from "../../features/model-switcher/ModelSwitcher";
 import { CopyAsAngularButton } from "../../features/angular-copy/CopyAsAngularButton";
 import { useIterateStore } from "../../features/iterate/iterateStore";
+import { DesignSpecTriggerButton } from "../../features/design-spec/DesignSpecTriggerButton";
+import { DesignSpecDialog } from "../../features/design-spec/DesignSpecDialog";
 
 const IFRAME_WIDTH = 1280;
 const IFRAME_HEIGHT = 550;
@@ -218,7 +220,8 @@ function Variants() {
 
       {isSelectedComplete && selectedCode.trim().length > 0 && (
         <>
-          <div className="mt-2 flex items-center justify-end">
+          <div className="mt-2 flex items-center justify-end gap-1.5">
+            <DesignSpecTriggerButton variantIndex={selectedVariantIndex} />
             <CopyAsAngularButton code={selectedCode} />
           </div>
           <IteratePane
@@ -227,6 +230,10 @@ function Variants() {
             variantModel={selectedVariant?.model}
             commitHash={commit.hash}
             isVariantComplete={isSelectedComplete}
+          />
+          <DesignSpecDialog
+            variantIndex={selectedVariantIndex}
+            variantCode={selectedCode}
           />
         </>
       )}

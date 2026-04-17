@@ -4,11 +4,13 @@ import { toast } from "react-hot-toast";
 
 import { useAppStore } from "../../store/app-store";
 import { useProjectStore } from "../../store/project-store";
+import { useSessionStore } from "../../store/session-store";
 import {
   CODE_GENERATION_MODEL_DESCRIPTIONS,
   CodeGenerationModel,
 } from "../../lib/models";
 import { useThrottle } from "../../hooks/useThrottle";
+import { queueRefinement } from "../../lib/design-api";
 
 import { getIterateActions } from "./bridge";
 import {
@@ -108,6 +110,7 @@ export function IteratePane({
   const setUpdateInstruction = useAppStore((s) => s.setUpdateInstruction);
   const setUpdateImages = useAppStore((s) => s.setUpdateImages);
   const latestCommitHash = useProjectStore((s) => s.latestCommitHash);
+  const sessionId = useSessionStore((s) => s.sessionId);
 
   // When a new commit lands that follows our submission, inform the reducer.
   useEffect(() => {
@@ -169,6 +172,21 @@ export function IteratePane({
       beforeCode: variantCode,
       variantIndex,
     });
+
+    // Persist the refinement to the session audit trail so the backend's
+    // refinement queue stays in sync with what actually runs through the
+    // WebSocket pipeline. Fire-and-forget — the WebSocket path is
+    // authoritative, so we never block generation on the audit call.
+    if (sessionId) {
+      void queueRefinement(sessionId, {
+        variantIndex,
+        text: state.text || undefined,
+        imageDataUrl: state.images[0],
+      }).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn("Refinement audit failed (non-blocking):", message);
+      });
+    }
 
     // Replace any lingering Sidebar draft so the refinement is unambiguous —
     // the existing doUpdate flow reads updateInstruction/updateImages from

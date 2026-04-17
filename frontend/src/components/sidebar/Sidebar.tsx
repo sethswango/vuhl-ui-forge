@@ -9,6 +9,7 @@ import { toast } from "react-hot-toast";
 import Variants from "../variants/Variants";
 import UpdateImageUpload, { UpdateImagePreview } from "../UpdateImageUpload";
 import AgentActivity from "../agent/AgentActivity";
+import { ProjectContextPanel } from "../../features/project-context/ProjectContextPanel";
 import WorkingPulse from "../core/WorkingPulse";
 import ImageLightbox from "../ImageLightbox";
 import { Commit } from "../commits/types";
@@ -276,6 +277,7 @@ function Sidebar({
   return (
     <div className="flex flex-col h-full">
       <div className="shrink-0 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-4 py-2">
+        <ProjectContextPanel />
         <Variants />
       </div>
 
