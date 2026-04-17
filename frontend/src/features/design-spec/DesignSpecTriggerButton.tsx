@@ -1,22 +1,23 @@
 import { LuFileCode } from "react-icons/lu";
 
-import { useDesignStore } from "../../store/design-store";
+import { specCacheKey, useDesignStore } from "../../store/design-store";
 import { useSessionStore } from "../../store/session-store";
 
 interface DesignSpecTriggerButtonProps {
+  commitHash: string;
   variantIndex: number;
   disabled?: boolean;
 }
 
 export function DesignSpecTriggerButton({
+  commitHash,
   variantIndex,
   disabled = false,
 }: DesignSpecTriggerButtonProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
   const openSpec = useDesignStore((s) => s.openSpec);
-  const specEntry = useDesignStore(
-    (s) => s.specByVariant[variantIndex] ?? null,
-  );
+  const cacheKey = specCacheKey({ commitHash, variantIndex });
+  const specEntry = useDesignStore((s) => s.specByVariant[cacheKey] ?? null);
 
   const hasSpec = specEntry?.status === "ready" && specEntry.result !== null;
   const isLoading = specEntry?.status === "loading";
@@ -30,7 +31,7 @@ export function DesignSpecTriggerButton({
   return (
     <button
       type="button"
-      onClick={() => openSpec(variantIndex)}
+      onClick={() => openSpec({ commitHash, variantIndex })}
       disabled={isDisabled}
       title={title}
       className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${

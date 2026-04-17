@@ -10,6 +10,15 @@ interface SpecEntry {
   error: string | null;
 }
 
+export interface SpecCacheKey {
+  commitHash: string;
+  variantIndex: number;
+}
+
+export function specCacheKey(key: SpecCacheKey): string {
+  return `${key.commitHash}::${key.variantIndex}`;
+}
+
 interface DesignStore {
   projectPath: string;
   projectContext: ProjectContext | null;
@@ -17,8 +26,8 @@ interface DesignStore {
   scanError: string | null;
   lastScannedAt: number | null;
 
-  specByVariant: Record<number, SpecEntry>;
-  openSpecVariant: number | null;
+  specByVariant: Record<string, SpecEntry>;
+  openSpecKey: string | null;
 
   setProjectPath: (path: string) => void;
   beginScan: () => void;
@@ -26,12 +35,12 @@ interface DesignStore {
   scanFailed: (error: string) => void;
   clearProjectContext: () => void;
 
-  beginSpecFetch: (variantIndex: number) => void;
-  specFetchSucceeded: (variantIndex: number, result: DesignSpecResult) => void;
-  specFetchFailed: (variantIndex: number, error: string) => void;
-  openSpec: (variantIndex: number) => void;
+  beginSpecFetch: (key: SpecCacheKey) => void;
+  specFetchSucceeded: (key: SpecCacheKey, result: DesignSpecResult) => void;
+  specFetchFailed: (key: SpecCacheKey, error: string) => void;
+  openSpec: (key: SpecCacheKey) => void;
   closeSpec: () => void;
-  clearSpec: (variantIndex: number) => void;
+  clearSpec: (key: SpecCacheKey) => void;
 }
 
 export const useDesignStore = create<DesignStore>((set) => ({
@@ -42,7 +51,7 @@ export const useDesignStore = create<DesignStore>((set) => ({
   lastScannedAt: null,
 
   specByVariant: {},
-  openSpecVariant: null,
+  openSpecKey: null,
 
   setProjectPath: (path: string) => set({ projectPath: path }),
   beginScan: () => set({ scanStatus: "scanning", scanError: null }),
@@ -63,41 +72,48 @@ export const useDesignStore = create<DesignStore>((set) => ({
       lastScannedAt: null,
     }),
 
-  beginSpecFetch: (variantIndex: number) =>
+  beginSpecFetch: (key: SpecCacheKey) => {
+    const cacheKey = specCacheKey(key);
     set((state) => ({
       specByVariant: {
         ...state.specByVariant,
-        [variantIndex]: {
+        [cacheKey]: {
           status: "loading",
-          result: state.specByVariant[variantIndex]?.result ?? null,
+          result: state.specByVariant[cacheKey]?.result ?? null,
           error: null,
         },
       },
-    })),
-  specFetchSucceeded: (variantIndex: number, result: DesignSpecResult) =>
+    }));
+  },
+  specFetchSucceeded: (key: SpecCacheKey, result: DesignSpecResult) => {
+    const cacheKey = specCacheKey(key);
     set((state) => ({
       specByVariant: {
         ...state.specByVariant,
-        [variantIndex]: { status: "ready", result, error: null },
+        [cacheKey]: { status: "ready", result, error: null },
       },
-    })),
-  specFetchFailed: (variantIndex: number, error: string) =>
+    }));
+  },
+  specFetchFailed: (key: SpecCacheKey, error: string) => {
+    const cacheKey = specCacheKey(key);
     set((state) => ({
       specByVariant: {
         ...state.specByVariant,
-        [variantIndex]: {
+        [cacheKey]: {
           status: "error",
-          result: state.specByVariant[variantIndex]?.result ?? null,
+          result: state.specByVariant[cacheKey]?.result ?? null,
           error,
         },
       },
-    })),
-  openSpec: (variantIndex: number) => set({ openSpecVariant: variantIndex }),
-  closeSpec: () => set({ openSpecVariant: null }),
-  clearSpec: (variantIndex: number) =>
+    }));
+  },
+  openSpec: (key: SpecCacheKey) => set({ openSpecKey: specCacheKey(key) }),
+  closeSpec: () => set({ openSpecKey: null }),
+  clearSpec: (key: SpecCacheKey) =>
     set((state) => {
+      const cacheKey = specCacheKey(key);
       const next = { ...state.specByVariant };
-      delete next[variantIndex];
+      delete next[cacheKey];
       return { specByVariant: next };
     }),
 }));

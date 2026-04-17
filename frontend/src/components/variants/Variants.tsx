@@ -221,7 +221,10 @@ function Variants() {
       {isSelectedComplete && selectedCode.trim().length > 0 && (
         <>
           <div className="mt-2 flex items-center justify-end gap-1.5">
-            <DesignSpecTriggerButton variantIndex={selectedVariantIndex} />
+            <DesignSpecTriggerButton
+              commitHash={commit.hash}
+              variantIndex={selectedVariantIndex}
+            />
             <CopyAsAngularButton code={selectedCode} />
           </div>
           <IteratePane
@@ -232,6 +235,7 @@ function Variants() {
             isVariantComplete={isSelectedComplete}
           />
           <DesignSpecDialog
+            commitHash={commit.hash}
             variantIndex={selectedVariantIndex}
             variantCode={selectedCode}
           />

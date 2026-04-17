@@ -79,4 +79,104 @@ describe("convertHtmlToAngular", () => {
     expect(template).not.toContain("@for");
     expect(componentTs).toContain("no heuristics fired");
   });
+
+  test("data-model on a text input becomes [(ngModel)] and imports FormsModule", () => {
+    const result = convertHtmlToAngular(
+      `<input type="text" data-model="email" class="input" placeholder="Email" />`,
+    );
+
+    expect(result.template).toContain(`[(ngModel)]="email"`);
+    expect(result.template).toContain(`name="email"`);
+    expect(result.template).not.toMatch(/data-model/);
+    expect(result.componentTs).toContain(
+      `import { FormsModule } from '@angular/forms';`,
+    );
+    expect(result.componentTs).toContain(`imports: [FormsModule]`);
+    expect(result.componentTs).toContain(`email = '';`);
+    expect(result.componentTs).toContain("data-model-to-ngmodel");
+    expect(result.imports).toContain("@angular/forms");
+    expect(result.followUps).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("FormsModule is imported"),
+      ]),
+    );
+  });
+
+  test("data-model on a number input seeds a numeric default", () => {
+    const result = convertHtmlToAngular(
+      `<input type="number" data-model="quantity" />`,
+    );
+
+    expect(result.componentTs).toContain(`quantity = 0;`);
+    expect(result.componentTs).toContain(`import { FormsModule }`);
+  });
+
+  test("data-model on a checkbox uses boolean default and marks checkbox heuristic", () => {
+    const result = convertHtmlToAngular(
+      `<input type="checkbox" data-model="agreed" />`,
+    );
+
+    expect(result.template).toContain(`[(ngModel)]="agreed"`);
+    expect(result.componentTs).toContain(`agreed = false;`);
+    expect(result.componentTs).toContain("checkbox-to-checked");
+  });
+
+  test("data-bind on a non-input emits [value] with readonly string field", () => {
+    const result = convertHtmlToAngular(
+      `<span data-bind="userName" class="text-gray-700"></span>`,
+    );
+
+    expect(result.template).toContain(`[value]="userName"`);
+    expect(result.template).not.toMatch(/data-bind=/);
+    expect(result.componentTs).toContain(`userName = '';`);
+    expect(result.componentTs).toContain("data-bind-to-property");
+    expect(result.componentTs).not.toContain("FormsModule");
+  });
+
+  test("data-show becomes an @if wrapper but reports data-show-to-if heuristic", () => {
+    const result = convertHtmlToAngular(
+      `<div data-show="hasError" class="text-red-500">Error</div>`,
+    );
+
+    expect(result.template).toContain(`@if (hasError) {`);
+    expect(result.template).toContain(`<div class="text-red-500">`);
+    expect(result.componentTs).toContain(`hasError = false;`);
+    expect(result.componentTs).toContain("data-show-to-if");
+    expect(result.componentTs).not.toContain("data-if-to-if");
+  });
+
+  test("<form> elements emit a reactive-form follow-up note", () => {
+    const result = convertHtmlToAngular(
+      `<form><input type="text" data-model="name" /></form>`,
+    );
+
+    expect(result.componentTs).toContain("form-reactive-hint");
+    expect(result.followUps).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("ReactiveFormsModule"),
+      ]),
+    );
+  });
+
+  test("data-model with a non-identifier value is passed through unchanged", () => {
+    const result = convertHtmlToAngular(
+      `<input type="text" data-model="user.name.first" />`,
+    );
+
+    expect(result.template).toContain(`data-model="user.name.first"`);
+    expect(result.template).not.toContain(`[(ngModel)]`);
+    expect(result.componentTs).not.toContain("FormsModule");
+  });
+
+  test("folded list emits a follow-up prompt about typed sources", () => {
+    const result = convertHtmlToAngular(
+      `<ul><li>Alpha</li><li>Beta</li></ul>`,
+    );
+
+    expect(result.followUps).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("typed source of truth"),
+      ]),
+    );
+  });
 });

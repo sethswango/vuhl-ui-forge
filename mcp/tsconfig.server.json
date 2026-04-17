@@ -12,7 +12,8 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "declaration": true,
-    "declarationMap": true
+    "declarationMap": true,
+    "composite": true
   },
   "include": ["src/server/**/*.ts"],
   "exclude": ["node_modules", "dist", "src/server/**/*.test.ts"]

@@ -15,7 +15,12 @@ export type AppliedHeuristic =
   | "onchange-to-change"
   | "oninput-to-input"
   | "list-to-for"
-  | "data-if-to-if";
+  | "data-if-to-if"
+  | "data-show-to-if"
+  | "data-model-to-ngmodel"
+  | "data-bind-to-property"
+  | "checkbox-to-checked"
+  | "form-reactive-hint";
 
 export interface AngularConversionOptions {
   componentName?: string;
@@ -26,6 +31,13 @@ export interface AngularConversionResult {
   template: string;
   componentTs: string;
   imports: string[];
+  /**
+   * Extra annotations that the caller can include in the handoff prompt.
+   * Present when the converter detects Angular-specific integration work
+   * that cannot be expressed in the template alone (e.g. FormsModule
+   * imports, reactive-form scaffolding).
+   */
+  followUps: string[];
 }
 
 // --- AST types -------------------------------------------------------------
@@ -223,6 +235,8 @@ interface TransformContext {
   fieldOrder: string[];
   methods: Set<string>;
   listCounter: { value: number };
+  usesFormsModule: boolean;
+  reactiveFormHint: boolean;
 }
 
 function newContext(): TransformContext {
@@ -232,12 +246,20 @@ function newContext(): TransformContext {
     fieldOrder: [],
     methods: new Set<string>(),
     listCounter: { value: 0 },
+    usesFormsModule: false,
+    reactiveFormHint: false,
   };
 }
 
 function setField(ctx: TransformContext, name: string, value: string): void {
   if (!(name in ctx.fields)) ctx.fieldOrder.push(name);
   ctx.fields[name] = value;
+}
+
+const IDENT_RE = /^[A-Za-z_$][\w$]*$/;
+
+function isValidIdent(name: string): boolean {
+  return IDENT_RE.test(name);
 }
 
 // Marker used by transform to flag a wrapper without mutating the tree shape.
@@ -264,6 +286,20 @@ function transformElement(
 ): AstNode {
   const newAttrs: AttrPair[] = [];
   let dataIfExpr: string | null = null;
+  let dataShowExpr: string | null = null;
+
+  if (el.tag === "form") {
+    ctx.applied.add("form-reactive-hint");
+    ctx.reactiveFormHint = true;
+  }
+
+  const attrMap = new Map<string, string | null>(
+    el.attrs.map(([k, v]) => [k.toLowerCase(), v]),
+  );
+  const isCheckboxLike =
+    el.tag === "input" &&
+    ((attrMap.get("type") ?? "").toLowerCase() === "checkbox" ||
+      (attrMap.get("type") ?? "").toLowerCase() === "radio");
 
   for (const [name, value] of el.attrs) {
     const lower = name.toLowerCase();
@@ -290,8 +326,35 @@ function transformElement(
       registerConditionField(ctx, value);
       continue;
     }
-    // Preserve aria-*, data-*, and all other attrs verbatim (including
-    // Tailwind classes). Attribute ordering is preserved for readability.
+    if (lower === "data-show" && value !== null) {
+      dataShowExpr = value;
+      registerConditionField(ctx, value);
+      continue;
+    }
+    if (lower === "data-model" && value !== null && isValidIdent(value)) {
+      ctx.applied.add("data-model-to-ngmodel");
+      ctx.usesFormsModule = true;
+      registerModelField(ctx, value, el, attrMap);
+      if (isCheckboxLike) {
+        ctx.applied.add("checkbox-to-checked");
+        newAttrs.push(["[(ngModel)]", value]);
+      } else {
+        newAttrs.push(["[(ngModel)]", value]);
+      }
+      newAttrs.push(["name", value]);
+      continue;
+    }
+    if (lower === "data-bind" && value !== null && isValidIdent(value)) {
+      ctx.applied.add("data-bind-to-property");
+      registerReadonlyField(ctx, value);
+      if (isCheckboxLike) {
+        ctx.applied.add("checkbox-to-checked");
+        newAttrs.push(["[checked]", value]);
+      } else {
+        newAttrs.push(["[value]", value]);
+      }
+      continue;
+    }
     newAttrs.push([name, value]);
   }
 
@@ -313,7 +376,51 @@ function transformElement(
       children: [transformedEl],
     };
   }
+  if (dataShowExpr !== null) {
+    ctx.applied.add("data-show-to-if");
+    return {
+      type: "element",
+      tag: IF_WRAPPER_TAG,
+      attrs: [["expr", dataShowExpr]],
+      children: [transformedEl],
+    };
+  }
   return transformedEl;
+}
+
+function defaultForInputType(inputType: string | null | undefined): string {
+  if (!inputType) return "''";
+  const t = inputType.toLowerCase();
+  if (t === "number" || t === "range") return "0";
+  if (t === "checkbox" || t === "radio") return "false";
+  return "''";
+}
+
+function registerModelField(
+  ctx: TransformContext,
+  name: string,
+  el: ElementNode,
+  attrMap: Map<string, string | null>,
+): void {
+  if (name in ctx.fields) return;
+  if (el.tag === "input") {
+    const initial = defaultForInputType(attrMap.get("type") ?? null);
+    setField(ctx, name, initial);
+    return;
+  }
+  if (el.tag === "textarea") {
+    setField(ctx, name, "''");
+    return;
+  }
+  if (el.tag === "select") {
+    setField(ctx, name, "''");
+    return;
+  }
+  setField(ctx, name, "''");
+}
+
+function registerReadonlyField(ctx: TransformContext, name: string): void {
+  if (!(name in ctx.fields)) setField(ctx, name, "''");
 }
 
 function registerHandlerStub(ctx: TransformContext, expression: string): void {
@@ -541,11 +648,20 @@ function renderComponentTs(args: {
   fields: Record<string, string>;
   methods: Set<string>;
   useSignals: boolean;
+  usesFormsModule: boolean;
 }): { componentTs: string; imports: string[] } {
   const imports: string[] = ["@angular/core"];
   const coreImports = new Set<string>(["Component"]);
   if (args.useSignals) coreImports.add("signal");
-  const importLine = `import { ${Array.from(coreImports).join(", ")} } from '@angular/core';`;
+  const coreImportLine = `import { ${Array.from(coreImports).join(", ")} } from '@angular/core';`;
+
+  const extraImportLines: string[] = [];
+  const componentImports: string[] = [];
+  if (args.usesFormsModule) {
+    extraImportLines.push(`import { FormsModule } from '@angular/forms';`);
+    componentImports.push("FormsModule");
+    imports.push("@angular/forms");
+  }
 
   const banner = renderHeuristicsBanner(args.appliedHeuristics);
   const indentedTemplate = args.template
@@ -561,12 +677,19 @@ function renderComponentTs(args: {
       ? `\n${fieldsBlock}${fieldsBlock && methodsBlock ? "\n" : ""}${methodsBlock}`
       : "";
 
+  const importsLine =
+    componentImports.length > 0
+      ? `\n  imports: [${componentImports.join(", ")}],`
+      : "";
+
+  const allImportLines = [coreImportLine, ...extraImportLines].join("\n");
+
   const componentTs = `${banner}
-${importLine}
+${allImportLines}
 
 @Component({
   selector: '${args.selector}',
-  standalone: true,
+  standalone: true,${importsLine}
   template: \`
 ${indentedTemplate}
   \`,
@@ -575,6 +698,33 @@ export class ${args.componentName} {${classBody}}
 `;
 
   return { componentTs, imports };
+}
+
+function computeFollowUps(ctx: TransformContext): string[] {
+  const followUps: string[] = [];
+  if (ctx.usesFormsModule) {
+    followUps.push(
+      "FormsModule is imported for [(ngModel)] bindings. For complex forms" +
+        " prefer Reactive Forms (ReactiveFormsModule + FormGroup/FormControl)" +
+        " and typed form validators.",
+    );
+  }
+  if (ctx.reactiveFormHint) {
+    followUps.push(
+      "A <form> element was detected. Consider promoting this to a" +
+        " ReactiveFormsModule FormGroup with typed controls and a submit" +
+        " handler — that matches Angular 17+ conventions and unlocks" +
+        " validators, dirty tracking, and typed values.",
+    );
+  }
+  if (ctx.applied.has("list-to-for")) {
+    followUps.push(
+      "List-to-@for folded plain-text siblings into a single @for loop." +
+        " Replace the literal string array with the typed source of truth" +
+        " (signal, observable, or input) from your project before shipping.",
+    );
+  }
+  return followUps;
 }
 
 // --- Public API ------------------------------------------------------------
@@ -600,7 +750,13 @@ export function convertHtmlToAngular(
     fields: ctx.fields,
     methods: ctx.methods,
     useSignals,
+    usesFormsModule: ctx.usesFormsModule,
   });
 
-  return { template, componentTs, imports };
+  return {
+    template,
+    componentTs,
+    imports,
+    followUps: computeFollowUps(ctx),
+  };
 }

@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from "../../components/ui/dialog";
 import { extractDesignSpec } from "../../lib/design-api";
-import { useDesignStore } from "../../store/design-store";
+import { specCacheKey, useDesignStore } from "../../store/design-store";
 import { useSessionStore } from "../../store/session-store";
 
 const CONFIDENCE_BADGE_CLASS: Record<string, string> = {
@@ -35,27 +35,28 @@ function ConfidenceBadge({ confidence }: { confidence: string }) {
 }
 
 interface DesignSpecDialogProps {
+  commitHash: string;
   variantIndex: number;
   variantCode: string;
 }
 
 export function DesignSpecDialog({
+  commitHash,
   variantIndex,
   variantCode,
 }: DesignSpecDialogProps) {
   const sessionId = useSessionStore((s) => s.sessionId);
-  const openSpecVariant = useDesignStore((s) => s.openSpecVariant);
+  const openSpecKey = useDesignStore((s) => s.openSpecKey);
   const closeSpec = useDesignStore((s) => s.closeSpec);
-  const specEntry = useDesignStore(
-    (s) => s.specByVariant[variantIndex] ?? null,
-  );
+  const cacheKey = specCacheKey({ commitHash, variantIndex });
+  const specEntry = useDesignStore((s) => s.specByVariant[cacheKey] ?? null);
   const beginSpecFetch = useDesignStore((s) => s.beginSpecFetch);
   const specFetchSucceeded = useDesignStore((s) => s.specFetchSucceeded);
   const specFetchFailed = useDesignStore((s) => s.specFetchFailed);
 
   const [copied, setCopied] = useState(false);
 
-  const isOpen = openSpecVariant === variantIndex;
+  const isOpen = openSpecKey === cacheKey;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -64,20 +65,21 @@ export function DesignSpecDialog({
       return;
 
     let cancelled = false;
-    beginSpecFetch(variantIndex);
+    const key = { commitHash, variantIndex };
+    beginSpecFetch(key);
     extractDesignSpec(sessionId, {
       variantIndex,
       persistAsContext: true,
     })
       .then((result) => {
         if (cancelled) return;
-        specFetchSucceeded(variantIndex, result);
+        specFetchSucceeded(key, result);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
         const message =
           error instanceof Error ? error.message : String(error);
-        specFetchFailed(variantIndex, message);
+        specFetchFailed(key, message);
       });
 
     return () => {
@@ -87,6 +89,7 @@ export function DesignSpecDialog({
     isOpen,
     sessionId,
     specEntry,
+    commitHash,
     variantIndex,
     beginSpecFetch,
     specFetchSucceeded,

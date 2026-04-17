@@ -27,15 +27,33 @@ export function CopyAsAngularButton({
     }
     try {
       const result = convertHtmlToAngular(code, { componentName });
+      const followUpBlock =
+        result.followUps.length > 0
+          ? [
+              "",
+              "<!-- angular-convert follow-up notes:",
+              ...result.followUps.map((note) => `  - ${note}`),
+              "-->",
+            ].join("\n")
+          : "";
       const payload = [
         result.componentTs,
+        followUpBlock,
         "",
         "<!-- angular-convert template preview -->",
         result.template,
-      ].join("\n");
+      ]
+        .filter((section) => section !== "")
+        .join("\n");
       copy(payload, { format: "text/plain" });
       setCopied(true);
-      toast.success("Copied Angular scaffold to clipboard.");
+      const detail =
+        result.followUps.length > 0
+          ? `Angular scaffold copied. ${result.followUps.length} follow-up note${
+              result.followUps.length === 1 ? "" : "s"
+            } included.`
+          : "Copied Angular scaffold to clipboard.";
+      toast.success(detail);
       window.setTimeout(() => setCopied(false), 1500);
     } catch (err) {
       console.error("Failed to convert HTML to Angular", err);

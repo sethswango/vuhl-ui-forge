@@ -473,50 +473,250 @@ def _alignment_notes(
     notes: List[str] = []
     framework = project_context.framework.name
     patterns = project_context.patterns
+    conventions = project_context.conventions
+    css_tokens = project_context.css_tokens
+
+    has_forms = any(hint.kind == "form_input" for hint in state_hints)
+    has_lists = any(hint.kind == "list" for hint in state_hints)
+    has_async = any(hint.kind == "async_data" for hint in state_hints)
+    has_toggles = any(hint.kind == "toggle" for hint in state_hints)
 
     if framework == "angular":
-        if patterns.uses_signals:
-            notes.append(
-                "State idiom: this project uses Angular signals. Model list and"
-                " toggle state as `signal<T>()` / `computed()`, not RxJS streams."
-            )
-        elif patterns.uses_observables:
-            notes.append(
-                "State idiom: this project uses RxJS observables. Model async data"
-                " with `Observable`/`AsyncPipe`, not ad-hoc `setTimeout` or local"
-                " state."
-            )
-        if patterns.angular_standalone:
-            notes.append(
-                "Component style: this project uses standalone components; new"
-                " components must set `standalone: true` and import their"
-                " dependencies directly."
-            )
-        elif patterns.angular_standalone is False:
-            notes.append(
-                "Component style: this project uses NgModule-registered components;"
-                " declare the new component in the appropriate module."
-            )
-        if patterns.angular_zoneless:
-            notes.append(
-                "Change detection: project runs zoneless. Avoid APIs that assume"
-                " zone-based change detection."
-            )
+        _angular_alignment_notes(
+            notes,
+            patterns=patterns,
+            has_forms=has_forms,
+            has_lists=has_lists,
+            has_async=has_async,
+            has_toggles=has_toggles,
+        )
     elif framework in {"react", "next"}:
-        if patterns.uses_hooks:
-            notes.append(
-                "State idiom: this project uses React hooks. Manage local state"
-                " with `useState`/`useReducer` and side effects with `useEffect`."
-            )
+        _react_alignment_notes(
+            notes,
+            patterns=patterns,
+            framework=framework,
+            has_forms=has_forms,
+            has_lists=has_lists,
+            has_async=has_async,
+        )
     elif framework == "vue":
-        if patterns.uses_composition_api:
+        _vue_alignment_notes(
+            notes,
+            patterns=patterns,
+            has_forms=has_forms,
+            has_lists=has_lists,
+        )
+
+    _token_alignment_notes(notes, css_tokens=css_tokens, tokens=tokens)
+
+    if bindings:
+        notes.append(
+            "Event bindings: the spec uses inline `on*=` attributes; bind through"
+            " the framework's idiomatic event syntax (`(click)`, `onClick`, `@click`)"
+            " instead of inline JavaScript strings."
+        )
+
+    _conventions_alignment_notes(notes, conventions=conventions, framework=framework)
+
+    notes.append(
+        "Align better than the spec did: the spec was generated from a"
+        " screenshot approximation — treat copy, iconography, and spacing as"
+        " hints, not source of truth, and prefer the project's tokens and"
+        " existing components over the literal output."
+    )
+    return _dedupe_preserve_order(notes)
+
+
+def _angular_alignment_notes(
+    notes: List[str],
+    *,
+    patterns: Any,
+    has_forms: bool,
+    has_lists: bool,
+    has_async: bool,
+    has_toggles: bool,
+) -> None:
+    state_style = (patterns.state_style or "").lower()
+
+    if patterns.uses_signals or state_style == "signals":
+        notes.append(
+            "State idiom: this project uses Angular signals. Model component"
+            " state with `signal<T>()` and derive view-model slices with"
+            " `computed()`; use `effect()` for imperative side effects only."
+        )
+        if patterns.uses_rxjs or patterns.uses_observables:
             notes.append(
-                "State idiom: this project uses the Vue composition API. Model"
-                " reactive state with `ref()`/`reactive()`, not the options API."
+                "Signals + RxJS interop: this project also uses RxJS. Bridge"
+                " streams into the template with `toSignal(stream$)` and expose"
+                " signals to consumers with `toObservable(signal)` — don't"
+                " mix `async` pipe and signal reads on the same binding."
+            )
+    elif patterns.uses_observables or patterns.uses_rxjs or state_style in {
+        "observables",
+        "rxjs",
+    }:
+        notes.append(
+            "State idiom: this project uses RxJS observables. Model async data"
+            " with `Observable`/`BehaviorSubject` + `async` pipe, not ad-hoc"
+            " `setTimeout` or local mutable state."
+        )
+    else:
+        notes.append(
+            "State idiom: Angular project — prefer typed component state and"
+            " idiomatic inputs/outputs. Do not introduce signals or RxJS if"
+            " the surrounding component file does not already use them."
+        )
+
+    if patterns.angular_standalone:
+        notes.append(
+            "Component style: this project uses standalone components; new"
+            " components must set `standalone: true` and import their"
+            " dependencies directly (no NgModule registration)."
+        )
+    elif patterns.angular_standalone is False:
+        notes.append(
+            "Component style: this project uses NgModule-registered components;"
+            " declare the new component in the appropriate feature module and"
+            " export it if it is consumed outside the module."
+        )
+
+    if patterns.angular_zoneless:
+        notes.append(
+            "Change detection: project runs zoneless. Avoid APIs that assume"
+            " zone-based CD (e.g. direct `Date.now()` in templates, timers"
+            " outside of `NgZone.run`); prefer signals or explicit `markForCheck`."
+        )
+
+    if has_lists:
+        if patterns.uses_signals or state_style == "signals":
+            notes.append(
+                "Lists: render with `@for (item of items(); track item.id)` and"
+                " back `items` with a signal. The literal markup in the spec is"
+                " a placeholder, not a source of truth."
+            )
+        else:
+            notes.append(
+                "Lists: render from an iterable via `@for` (Angular 17+) or"
+                " `*ngFor`; do not hand-code repeated markup."
             )
 
-    if project_context.css_tokens.css_custom_properties:
-        first_props = list(project_context.css_tokens.css_custom_properties.keys())[:6]
+    if has_forms:
+        if patterns.uses_signals or state_style == "signals":
+            notes.append(
+                "Forms: this project uses signals — prefer signal-backed form"
+                " state or a `FormGroup` wired through `toSignal` for template"
+                " consumption. Avoid raw DOM reads (`input.value`)."
+            )
+        elif patterns.uses_rxjs or patterns.uses_observables:
+            notes.append(
+                "Forms: project already uses RxJS — prefer a typed"
+                " `FormGroup`/`FormControl` with validators over template-driven"
+                " forms. Subscribe to `valueChanges` for derived state."
+            )
+        else:
+            notes.append(
+                "Forms: bind inputs through Angular forms (`FormControl` or"
+                " `[(ngModel)]`) rather than raw DOM values; prefer reactive"
+                " forms for anything with validation."
+            )
+
+    if has_async:
+        if patterns.uses_signals or state_style == "signals":
+            notes.append(
+                "Async data: adapt through the existing data layer and expose"
+                " the result as a signal or `toSignal(stream$)`. Don't introduce"
+                " ad-hoc `fetch` inside the component."
+            )
+        elif patterns.uses_rxjs or patterns.uses_observables:
+            notes.append(
+                "Async data: route through the project's service layer and an"
+                " `Observable`, and render via `async` pipe. Don't introduce"
+                " ad-hoc `fetch`/`setTimeout` in the component."
+            )
+
+    if has_toggles and patterns.uses_signals:
+        notes.append(
+            "Toggle state: back `aria-pressed`/`aria-expanded` with a"
+            " `signal<boolean>()` and mirror it into the template, so keyboard"
+            " and pointer interactions stay in sync."
+        )
+
+
+def _react_alignment_notes(
+    notes: List[str],
+    *,
+    patterns: Any,
+    framework: str,
+    has_forms: bool,
+    has_lists: bool,
+    has_async: bool,
+) -> None:
+    if patterns.uses_hooks or (patterns.state_style or "").lower() == "hooks":
+        notes.append(
+            "State idiom: this project uses React hooks. Manage local state"
+            " with `useState`/`useReducer` and side effects with `useEffect`;"
+            " extract cross-component state into custom hooks."
+        )
+    if has_lists:
+        notes.append(
+            "Lists: render from an iterable via `.map(...)` with a stable"
+            " `key`. Do not hand-code repeated markup."
+        )
+    if has_forms:
+        notes.append(
+            "Forms: bind inputs to controlled component state (`value` +"
+            " `onChange` paired with `useState`), or to a form library"
+            " already adopted by the project. Avoid uncontrolled inputs"
+            " unless the surrounding code pattern uses them."
+        )
+    if has_async:
+        notes.append(
+            "Async data: route requests through the existing data layer (e.g."
+            " `react-query`/`swr`/service hooks) if present. Only introduce"
+            " raw `fetch` when the repo shows no existing pattern."
+        )
+    if framework == "next":
+        notes.append(
+            "Next.js: respect the app/pages boundary and the server-vs-client"
+            " component split — add `'use client'` only when the component"
+            " needs state, effects, or browser APIs."
+        )
+
+
+def _vue_alignment_notes(
+    notes: List[str],
+    *,
+    patterns: Any,
+    has_forms: bool,
+    has_lists: bool,
+) -> None:
+    state_style = (patterns.state_style or "").lower()
+    if patterns.uses_composition_api or state_style == "composition":
+        notes.append(
+            "State idiom: this project uses the Vue composition API. Model"
+            " reactive state with `ref()`/`reactive()` and derived state with"
+            " `computed()`; avoid the options API."
+        )
+    if has_lists:
+        notes.append(
+            "Lists: render with `v-for` plus a stable `:key`; do not hand-code"
+            " repeated markup."
+        )
+    if has_forms:
+        notes.append(
+            "Forms: bind inputs with `v-model`; expose validation state as"
+            " computed refs rather than imperative handlers."
+        )
+
+
+def _token_alignment_notes(
+    notes: List[str],
+    *,
+    css_tokens: Any,
+    tokens: TokenUsage,
+) -> None:
+    if css_tokens.css_custom_properties:
+        first_props = list(css_tokens.css_custom_properties.keys())[:6]
         if tokens.colors:
             notes.append(
                 "CSS tokens: project defines custom properties "
@@ -529,53 +729,68 @@ def _alignment_notes(
                 f"{first_props}. Prefer `var(--name)` references when adding"
                 " colors, spacing, or typography."
             )
-    if project_context.css_tokens.tailwind_config_path:
+    if css_tokens.scss_variables:
+        first_vars = list(css_tokens.scss_variables.keys())[:6]
+        notes.append(
+            "SCSS tokens: project defines "
+            f"{first_vars}. Import and reuse these variables instead of"
+            " introducing new literals in component styles."
+        )
+    if css_tokens.tailwind_config_path:
         notes.append(
             "Tailwind: project ships a tailwind config at "
-            f"{project_context.css_tokens.tailwind_config_path}. Reuse the"
-            " configured theme tokens rather than inventing one-off values."
+            f"{css_tokens.tailwind_config_path}. Reuse the configured theme"
+            " tokens rather than inventing one-off values."
         )
-
-    if bindings:
+    if css_tokens.tailwind_custom_classes:
+        preview = ", ".join(css_tokens.tailwind_custom_classes[:4])
         notes.append(
-            "Event bindings: the spec uses inline `on*=` attributes; bind through"
-            " the framework's idiomatic event syntax (`(click)`, `onClick`, `@click`)"
-            " instead of inline JavaScript strings."
+            "Tailwind custom classes: project already defines "
+            f"{preview}. Reuse these before adding new utility combinations."
         )
-    if any(hint.kind == "list" for hint in state_hints):
-        if framework == "angular":
-            notes.append(
-                "Lists: render from an iterable via `@for` (Angular 17+) or"
-                " `*ngFor`; do not hand-code repeated markup."
-            )
-        elif framework in {"react", "next"}:
-            notes.append(
-                "Lists: render from an iterable via `.map(...)`; do not hand-code"
-                " repeated markup."
-            )
-        elif framework == "vue":
-            notes.append(
-                "Lists: render with `v-for`; do not hand-code repeated markup."
-            )
-    if any(hint.kind == "form_input" for hint in state_hints):
-        if framework == "angular":
-            notes.append(
-                "Forms: bind inputs through Angular forms (`FormControl` or"
-                " `[(ngModel)]`) rather than raw DOM values."
-            )
-        elif framework in {"react", "next"}:
-            notes.append(
-                "Forms: bind inputs to controlled component state or a form"
-                " library already in the project."
-            )
 
-    notes.append(
-        "Align better than the spec did: the spec was generated from a"
-        " screenshot approximation — treat copy, iconography, and spacing as"
-        " hints, not source of truth, and prefer the project's tokens and"
-        " existing components over the literal output."
-    )
-    return notes
+
+def _conventions_alignment_notes(
+    notes: List[str],
+    *,
+    conventions: Any,
+    framework: str,
+) -> None:
+    if conventions.naming_style:
+        notes.append(
+            "Naming: project convention is "
+            f"`{conventions.naming_style}`. Match file and symbol naming to"
+            " that convention when introducing new components."
+        )
+    if conventions.import_style:
+        notes.append(
+            "Imports: project convention is "
+            f"`{conventions.import_style}`. Match it — don't mix absolute and"
+            " relative imports on the same component."
+        )
+    if conventions.folder_layout:
+        preview = ", ".join(conventions.folder_layout[:4])
+        notes.append(
+            "Folder layout: place new files under the existing structure"
+            f" ({preview}); don't introduce a parallel tree."
+        )
+    if conventions.template_style and framework in {"angular", "vue"}:
+        notes.append(
+            f"Template style: project uses `{conventions.template_style}`."
+            " Match inline/external template and stylesheet conventions of"
+            " the surrounding components."
+        )
+
+
+def _dedupe_preserve_order(items: List[str]) -> List[str]:
+    seen: set[str] = set()
+    out: List[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
 
 
 def _generic_alignment_notes(
