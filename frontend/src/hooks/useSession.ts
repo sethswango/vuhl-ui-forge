@@ -1,6 +1,12 @@
 import { useCallback, useEffect } from "react";
 import { useSessionStore } from "../store/session-store";
-import { fetchSessionContext, selectSessionVariant } from "../lib/session-api";
+import {
+  CreateSessionRequest,
+  createSession,
+  fetchSessionContext,
+  selectSessionVariant,
+} from "../lib/session-api";
+import { ensureSession as ensureSessionCore } from "../lib/session-ensure";
 import { readSessionFromUrl, writeSessionToUrl } from "../lib/session-url";
 
 function getSessionIdFromUrl(): string | null {
@@ -89,6 +95,33 @@ export function useSession() {
     [adoptServerSession]
   );
 
+  /**
+   * Resolve a live ``sessionId``, creating a backend session on demand if
+   * one does not already exist. Use this whenever a pre-generation feature
+   * (e.g. project context scan) needs a session but the user hasn't yet
+   * triggered a generation turn.
+   *
+   * Idempotent: if a session is already active, the current ID is returned
+   * without network traffic. Concurrent callers during the "no session"
+   * window share a single in-flight ``createSession`` promise so only one
+   * session is ever minted per racing click.
+   *
+   * The core logic lives in ``lib/session-ensure`` so it can be exercised
+   * without React. We read the session id from the live store rather than
+   * the hook's captured ``sessionId`` to avoid a stale-closure window when
+   * two components call ``ensureSession`` in the same render tick.
+   */
+  const ensureSession = useCallback(
+    async (request: CreateSessionRequest = {}): Promise<string> => {
+      return ensureSessionCore(request, {
+        getSessionId: () => useSessionStore.getState().sessionId,
+        create: createSession,
+        adopt: adoptSessionFromServer,
+      });
+    },
+    [adoptSessionFromServer]
+  );
+
   return {
     sessionId,
     status,
@@ -99,5 +132,6 @@ export function useSession() {
     isSessionActive: sessionId !== null,
     approveVariant,
     adoptSessionFromServer,
+    ensureSession,
   };
 }

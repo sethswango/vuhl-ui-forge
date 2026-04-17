@@ -3,6 +3,7 @@ jest.mock("../config", () => ({
 }));
 
 import {
+  createSession,
   fetchSessionContext,
   postSessionVariants,
   selectSessionVariant,
@@ -151,6 +152,91 @@ describe("session-api", () => {
 
       const result = await fetchSessionExport("s1");
       expect(result).toEqual(payload);
+    });
+  });
+
+  describe("createSession", () => {
+    function mockCreated(id = "s-new", name = "Untitled design") {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: () =>
+          Promise.resolve({
+            session: {
+              id,
+              name,
+              stack: null,
+              input_mode: null,
+              metadata: {},
+            },
+            contexts: [],
+            variants: [],
+          }),
+      });
+    }
+
+    test("defaults to 'Untitled design' when no name provided", async () => {
+      mockCreated();
+      const result = await createSession();
+      expect(result).toEqual({ sessionId: "s-new", name: "Untitled design" });
+
+      const [, init] = mockFetch.mock.calls[0];
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body as string)).toEqual({
+        name: "Untitled design",
+      });
+    });
+
+    test("trims + forwards provided name, stack, input_mode, metadata", async () => {
+      mockCreated("s-1", "Fee Summary");
+      await createSession({
+        name: "  Fee Summary  ",
+        stack: "html_tailwind",
+        inputMode: "image",
+        metadata: { origin: "scan" },
+      });
+
+      const [, init] = mockFetch.mock.calls[0];
+      expect(JSON.parse(init.body as string)).toEqual({
+        name: "Fee Summary",
+        stack: "html_tailwind",
+        input_mode: "image",
+        metadata: { origin: "scan" },
+      });
+    });
+
+    test("falls back to default when name is whitespace only", async () => {
+      mockCreated();
+      await createSession({ name: "   " });
+      const [, init] = mockFetch.mock.calls[0];
+      expect(JSON.parse(init.body as string)).toEqual({
+        name: "Untitled design",
+      });
+    });
+
+    test("drops empty metadata so we don't POST noise", async () => {
+      mockCreated();
+      await createSession({ metadata: {} });
+      const [, init] = mockFetch.mock.calls[0];
+      expect(JSON.parse(init.body as string)).toEqual({
+        name: "Untitled design",
+      });
+    });
+
+    test("truncates long names to 200 chars to match backend cap", async () => {
+      mockCreated();
+      const longName = "x".repeat(500);
+      await createSession({ name: longName });
+      const [, init] = mockFetch.mock.calls[0];
+      const body = JSON.parse(init.body as string);
+      expect(body.name).toHaveLength(200);
+    });
+
+    test("throws when the backend rejects the request", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+      await expect(createSession()).rejects.toThrow(
+        "Failed to create session: 500"
+      );
     });
   });
 });

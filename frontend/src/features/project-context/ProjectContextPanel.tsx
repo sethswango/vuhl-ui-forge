@@ -1,18 +1,36 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LuFolderSearch, LuChevronDown, LuChevronUp, LuX } from "react-icons/lu";
 import { toast } from "react-hot-toast";
 
 import { useDesignStore } from "../../store/design-store";
-import { useSessionStore } from "../../store/session-store";
 import { gatherProjectContext } from "../../lib/design-api";
+import { useSession } from "../../hooks/useSession";
 import {
   formatStateStyle,
   frameworkLabel,
   summarizeProjectContext,
 } from "./helpers";
+import { loadProjectPath, saveProjectPath } from "./persistence";
 
-export function ProjectContextPanel() {
-  const sessionId = useSessionStore((s) => s.sessionId);
+export type ProjectContextPanelVariant = "compact" | "prominent";
+
+export interface ProjectContextPanelProps {
+  /**
+   * Controls visual weight and default-expanded state.
+   *
+   * - ``"compact"`` (default) — used in the Sidebar once generation has
+   *   started. Starts collapsed; assumes the user already knows what
+   *   project context is and just wants a quick lever.
+   * - ``"prominent"`` — used in the StartPane before the first generation.
+   *   Starts expanded and shows intro copy so users understand why they
+   *   should scan their project before their first prompt.
+   */
+  variant?: ProjectContextPanelVariant;
+}
+
+export function ProjectContextPanel({
+  variant = "compact",
+}: ProjectContextPanelProps = {}) {
   const projectPath = useDesignStore((s) => s.projectPath);
   const projectContext = useDesignStore((s) => s.projectContext);
   const scanStatus = useDesignStore((s) => s.scanStatus);
@@ -23,29 +41,46 @@ export function ProjectContextPanel() {
   const scanFailed = useDesignStore((s) => s.scanFailed);
   const clearProjectContext = useDesignStore((s) => s.clearProjectContext);
 
-  const [isExpanded, setIsExpanded] = useState(false);
+  const { ensureSession } = useSession();
+
+  const [isExpanded, setIsExpanded] = useState(variant === "prominent");
+
+  // Rehydrate the most recently scanned path from localStorage on mount so
+  // returning users don't have to retype their repo path. We only backfill
+  // when the store is empty — if another panel instance already populated
+  // the store, skip to avoid clobbering fresher in-memory state.
+  useEffect(() => {
+    if (projectPath.trim().length > 0) return;
+    const persisted = loadProjectPath();
+    if (persisted.trim().length === 0) return;
+    setProjectPath(persisted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const hasContext = projectContext !== null;
   const isScanning = scanStatus === "scanning";
-  const canScan =
-    !!sessionId && projectPath.trim().length > 0 && !isScanning;
+  const canScan = projectPath.trim().length > 0 && !isScanning;
   const summary = projectContext
     ? summarizeProjectContext(projectContext)
     : null;
 
   const handleScan = async () => {
-    if (!sessionId) {
-      toast.error("Create or open a session before scanning a project.");
-      return;
-    }
     const trimmed = projectPath.trim();
     if (trimmed.length === 0) return;
 
     beginScan();
     try {
-      const result = await gatherProjectContext(sessionId, {
+      // A session is required by the backend to attach the scan record.
+      // ``ensureSession`` mints one on demand when the user hasn't yet
+      // kicked off a generation turn — this is the core Round 7 unlock
+      // that lets project alignment inform the very first prompt instead
+      // of only subsequent iterations.
+      const activeSessionId = await ensureSession();
+      const result = await gatherProjectContext(activeSessionId, {
         repoPath: trimmed,
       });
       scanSucceeded(result.context);
+      saveProjectPath(trimmed);
       const label = frameworkLabel(result.context.framework.name);
       const componentCount = result.context.components.length;
       toast.success(
@@ -122,10 +157,15 @@ export function ProjectContextPanel() {
 
       {isExpanded && (
         <div className="mt-2 flex flex-col gap-2">
-          {!sessionId && (
-            <div className="rounded-md border border-dashed border-slate-300 bg-white/60 p-2 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
-              Session required. Start a design session before scanning a
-              project for context.
+          {variant === "prominent" && !hasContext && (
+            <div
+              className="rounded-md border border-violet-200 bg-violet-50 px-2.5 py-2 text-[11px] leading-snug text-violet-900 dark:border-violet-800/60 dark:bg-violet-900/20 dark:text-violet-100"
+              data-testid="project-context-intro"
+            >
+              Point the Forge at the repo you're designing for. We'll detect
+              your framework, reusable components, and design tokens so the
+              very first mockups align with your app — not a generic blank
+              slate.
             </div>
           )}
 
@@ -133,15 +173,14 @@ export function ProjectContextPanel() {
             <input
               type="text"
               value={projectPath}
-              onChange={(e) => setProjectPath(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setProjectPath(next);
+                saveProjectPath(next);
+              }}
               onKeyDown={handleKeyDown}
-              placeholder={
-                sessionId
-                  ? "Target repo path (e.g. C:\\dev\\my-app)"
-                  : "Session required"
-              }
-              disabled={!sessionId}
-              className="flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[12px] text-slate-800 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-300 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-500 dark:focus:ring-violet-500/30 dark:disabled:bg-slate-900"
+              placeholder="Target repo path (e.g. C:\\dev\\my-app)"
+              className="flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[12px] text-slate-800 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-500 dark:focus:ring-violet-500/30"
               data-testid="project-context-path"
             />
             <button
@@ -160,9 +199,13 @@ export function ProjectContextPanel() {
             {hasContext && (
               <button
                 type="button"
-                onClick={clearProjectContext}
+                onClick={() => {
+                  clearProjectContext();
+                  saveProjectPath("");
+                }}
                 className="rounded-md p-1 text-slate-500 hover:bg-slate-200 dark:text-slate-400 dark:hover:bg-slate-800"
                 title="Clear project context"
+                data-testid="project-context-clear"
               >
                 <LuX className="h-3.5 w-3.5" />
               </button>

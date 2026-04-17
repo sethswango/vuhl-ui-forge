@@ -48,14 +48,17 @@ def _make_params(**overrides: Any) -> ExtractedParams:
     return ExtractedParams(**defaults)
 
 
-def _capture_messages() -> tuple[list[tuple[str, str | None, int, dict | None]], Any]:
-    sent: list[tuple[str, str | None, int, dict | None]] = []
+SentMessage = tuple[str, str | None, int, dict[str, Any] | None]
+
+
+def _capture_messages() -> tuple[list[SentMessage], Any]:
+    sent: list[SentMessage] = []
 
     async def send_message(
         msg_type: str,
         value: str | None,
         variant_index: int,
-        data: dict | None = None,
+        data: dict[str, Any] | None = None,
         eventId: str | None = None,
     ) -> None:
         sent.append((msg_type, value, variant_index, data))

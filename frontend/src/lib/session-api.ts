@@ -9,6 +9,18 @@ export interface SessionContext {
   projectContext?: Record<string, unknown>;
 }
 
+export interface CreateSessionRequest {
+  name?: string;
+  stack?: string;
+  inputMode?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreatedSession {
+  sessionId: string;
+  name: string;
+}
+
 interface SessionContextRecord {
   id: string;
   context_type: string;
@@ -85,6 +97,49 @@ function normalizeSessionContext(detail: SessionDetailResponse): SessionContext 
       mergedPayload.projectContext !== null
         ? (mergedPayload.projectContext as Record<string, unknown>)
         : detail.session.metadata,
+  };
+}
+
+const DEFAULT_SESSION_NAME = "Untitled design";
+
+/**
+ * Create a new backend session.
+ *
+ * Used when the frontend needs a ``sessionId`` before the user triggers a
+ * generation turn (e.g. to scan project context on the StartPane). Keeping
+ * this client-side allows pre-generation features to light up without
+ * waiting on the auto-session minted by ``/generate-code``.
+ *
+ * The backend requires ``name`` to be non-empty; we default to a gentle
+ * placeholder if the caller doesn't provide one. The name can be overwritten
+ * later once the first prompt lands (see ``_derive_session_name`` in
+ * ``routes/generate_code.py``), but having a real value up front keeps
+ * session listings readable even if no generation ever follows.
+ */
+export async function createSession(
+  request: CreateSessionRequest = {}
+): Promise<CreatedSession> {
+  const body: Record<string, unknown> = {
+    name: (request.name?.trim() || DEFAULT_SESSION_NAME).slice(0, 200),
+  };
+  if (request.stack) body.stack = request.stack;
+  if (request.inputMode) body.input_mode = request.inputMode;
+  if (request.metadata && Object.keys(request.metadata).length > 0) {
+    body.metadata = request.metadata;
+  }
+
+  const res = await fetch(`${baseUrl}/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to create session: ${res.status}`);
+  }
+  const detail = (await res.json()) as SessionDetailResponse;
+  return {
+    sessionId: detail.session.id,
+    name: detail.session.name,
   };
 }
 
