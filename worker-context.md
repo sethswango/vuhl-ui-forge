@@ -276,3 +276,92 @@ Deliverables:
 - No changes to `/generate-code` WebSocket behaviour.
 - No duplication of the Angular converter in Python — the MCP handoff points at the in-UI converter in a note.
 - No changes to the Round 4 alignment-note logic. That surface is stable.
+
+---
+
+## Round 5 results — Implementer handoff bundle (shipped)
+
+### Files added
+
+- `frontend/src/features/implementer-handoff/composeHandoff.ts` — pure markdown composer. Takes `{ variantIndex, variantCode, variantModel, specResult, projectContext, angularConversion, generatedAt }` and returns a single self-contained document with metadata, goal, project context, alignment notes, reuse candidates, new-components, variant HTML, optional Angular scaffold with follow-up notes, and an implementer checklist.
+- `frontend/src/features/implementer-handoff/composeHandoff.test.ts` — 6 Jest tests: no-context standalone doc, with-context summary, empty-alignment elision, Angular scaffold inclusion + follow-ups, Angular scaffold omission, scan-warning surfacing.
+- `frontend/src/features/implementer-handoff/CopyForClaudeButton.tsx` — fetches/caches the spec via `useDesignStore`, builds an Angular scaffold when the detected framework warrants it (via `shouldIncludeAngular`), composes with `composeHandoff`, copies to clipboard, and provides a download-as-`.md` sibling button. Toast feedback on both paths.
+- `frontend/src/features/implementer-handoff/frameworkGate.ts` — pure `shouldIncludeAngular(name)` helper. Extracted from `CopyForClaudeButton` so the unit test doesn't transitively pull in the Vite-only `config.ts` and hit Jest's `import.meta.env` limitation (same issue Round 3 hit; this is the permanent fix pattern).
+- `frontend/src/features/implementer-handoff/shouldIncludeAngular.test.ts` — 3 Jest tests exercising null / "unknown" / angular / react / vue / blank.
+- `mcp/src/server/tools.ts` — new `prepare_implementer_handoff` tool + helpers `selectVariantFromExport`, `findProjectContextPayload`, `summarizeProjectContext`, `countEntries`, `countKeys`, `composeMcpHandoffMarkdown`. The MCP-side markdown mirrors the frontend shape minus the Angular scaffold and points Angular callers back at the in-UI "Copy as Angular" button.
+- `mcp/src/server/tools.test.ts` — 6 new tests covering registration, sessionId/variant validation, negative-index rejection, happy-path parallel fetch of `/spec` + `/export`, composed markdown assertions, and a no-project-context branch verifying the "ask the user to scan" hint.
+
+### Files modified
+
+- `frontend/src/components/variants/Variants.tsx` — mounts `CopyForClaudeButton` next to `DesignSpecTriggerButton` and `CopyAsAngularButton`. No other behavior change.
+- `mcp/.gitignore` — added `*.tsbuildinfo` so incremental build state stops polluting `git status`.
+
+### Verification
+
+- `cd frontend && corepack yarn test --runInBand` → **44 passed, 6 skipped, 0 failed** (was 35 passed pre-round).
+- `cd frontend && corepack yarn tsc --noEmit` → clean.
+- `cd frontend && corepack yarn lint` → clean.
+- `cd mcp && yarn tsc --noEmit -p tsconfig.server.json` → clean.
+- `cd mcp && node --import tsx --test src/server/tools.test.ts` → **22 passed, 0 failed** (was 16 passed pre-round).
+- `cd backend && poetry run pytest` → 132 passed (unchanged; backend untouched this round).
+- Committed as `feat: Round 5 implementer handoff bundle` and pushed to both `origin` (sethswango) and `pdt` (vu-product-development).
+
+### Deferred / limitations
+
+- **Initial generation is still project-unaware.** The variants emitted by `/generate-code` don't yet know about Tailwind tokens, existing components, or signals/observables/hooks signals from the target project. Today the handoff bundle injects that knowledge at the *implementer* boundary, which is the highest-leverage place — but it does not close the loop at the *generation* boundary.
+- **MCP Angular conversion omitted.** The Python/TypeScript handoff cannot emit an Angular scaffold because the converter lives in the browser (`frontend/src/lib/angular-convert`). CLI consumers are instructed to drop back into the UI for the Angular path. A future round could either port the converter to TS (it's already TS in the browser — the MCP could reuse it) or accept that the UI is the canonical Angular bridge.
+- **Model picker still absent at generation time.** Track B's `ModelSwitcher` (Round 2) exposes which models the backend is emitting but doesn't change them. Per-variant model override still requires `/generate-code` to accept a per-variant model list.
+
+---
+
+## Round 6 plan (unstarted — pick up here next session)
+
+Candidate rounds, in decreasing leverage:
+
+### Round 6A — Project-aware initial generation (preferred, highest ROI)
+
+Goal: make the four initial variants themselves respect project context, not just the implementer handoff.
+
+Sketch:
+
+1. **Pure helper** `backend/prompts/project_brief.py::build_project_brief(context: ProjectContext | None) -> str | None`. Returns a compact ~300-char system addendum summarizing framework + state style + top 5 reusable components + top design tokens, or `None` when no usable context exists. Unit-tested in isolation.
+2. **Session wiring** in `backend/routes/generate_code.py`'s `PromptCreationStage`: when `session_id` is present, call `sessions.service.latest_project_context(...)` (the helper `/sessions/{id}/spec` already uses — reuse it, don't copy). Pass the brief through to `build_prompt_messages` as a new optional kwarg `project_brief: str | None = None`. Default behavior unchanged when there is no session or no scan.
+3. **Injection point** in `prompts/pipeline.build_prompt_messages`: when `project_brief` is non-empty, append a system message after the existing system prompt (do NOT prepend to user text — that contaminates user intent). The `Prompt` type already accepts additional system messages.
+4. **Unit tests**:
+   - `test_project_brief.py` — 5 cases: no context, Angular signals, React hooks, Vue composition, plain HTML.
+   - `test_prompt_pipeline.py` — parametric test that the brief appears as a system message only when provided, never mutates history, and never leaks into user messages.
+5. **End-to-end confidence without running the server**: add one integration test that drives `build_prompt_messages` with a fixture `ProjectContext` and asserts the emitted message list contains the brief at the expected index and does not change any existing message shape.
+
+Risks / guardrails:
+
+- Keep the brief short. Models stop paying attention to long system addenda. Target under 500 characters.
+- When no session or no context, the code path is identical to today. This is the non-regression test.
+- Do not touch the WebSocket envelope. All changes are inside the prompt construction leg.
+- Do not touch history-mode builders (`build_update_prompt_from_history` / `..._from_file_snapshot`) — refinement should keep its current shape; the brief only lands on fresh-create paths (`build_create_prompt_from_input`).
+
+Verification:
+
+- `cd backend && poetry run pytest` — should gain ~10 tests and stay green.
+- `cd backend && poetry run pyright` — no new warnings.
+- `cd frontend && corepack yarn test --runInBand` — untouched; stays at 44 passing.
+- `cd mcp && node --import tsx --test src/server/tools.test.ts` — untouched; stays at 22 passing.
+
+### Round 6B — Real per-variant model override
+
+Only if 6A lands cleanly and there's appetite to also close the Round 2 Track B "Deferred" item.
+
+1. `/generate-code` WebSocket params accept `variantModels: string[]`.
+2. `ALL_KEYS_MODELS_DEFAULT` becomes a fallback when the list is missing/short.
+3. `ModelSwitcher` sends the list on "Re-run grid" instead of being advisory.
+
+### Round 6C — Frontend polish
+
+1. Success toast on generation complete pointing users at "Copy for Claude".
+2. Side-by-side before/after thumbnail in `IteratePane`.
+3. Visual indicator on the selected variant's "Copy for Claude" button when project context is stale (scan older than the variant).
+
+### Off-limits boundaries for Round 6 (any sub-round)
+
+- No changes to `mcp/src/server/tools.ts` in 6A — the handoff is frozen. It'll pick up project-aware generation automatically through the existing spec/export contract.
+- No migration of the Angular converter into Python. If we want MCP-side Angular output, port the existing TS `angular-convert` package to a shared MCP module, don't rewrite.
+- Keep the backend additive. `build_prompt_messages` signature change must default to `None` so existing callers keep compiling.
