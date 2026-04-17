@@ -293,6 +293,34 @@ def test_alignment_notes_are_deduplicated() -> None:
     assert len(notes) == len(set(notes)), "alignment notes should be deduped"
 
 
+def test_reused_component_is_not_also_listed_as_new_component() -> None:
+    """Regression: when a card-class section matches CardComponent for reuse,
+    we must not also list `card` under "new components needed" in the handoff."""
+    project = scan_project_context(FIXTURES / "angular_signals")
+
+    html = (
+        "<body><main>"
+        "<section class='card p-4' aria-expanded='false'>"
+        "<h2>Title</h2><p>Body</p>"
+        "</section>"
+        "</main></body>"
+    )
+
+    document = extract_design_spec(
+        session_id="session-dup",
+        variant_index=0,
+        html=html,
+        project_context=project,
+    )
+
+    reused = {s.component_name for s in document.spec.reuse_suggestions}
+    assert "CardComponent" in reused
+    assert "card" not in document.spec.new_components_needed
+    assert not any(
+        "card" == needed.lower() for needed in document.spec.new_components_needed
+    )
+
+
 def test_signals_form_note_prefers_signal_backed_forms() -> None:
     project = _synthetic_angular_context(
         uses_signals=True, state_style="signals"

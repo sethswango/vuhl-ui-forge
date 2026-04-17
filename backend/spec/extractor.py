@@ -353,12 +353,26 @@ def _suggest_reuses(
             matched_paths.add(path)
             break
 
-    existing_names = {c.name.lower() for c in project_context.components}
+    existing_hints: set[str] = set()
+    for component in project_context.components:
+        existing_hints.add(component.name.lower())
+        if component.selector:
+            existing_hints.add(component.selector.lower())
+            existing_hints.add(component.selector.replace("app-", "").lower())
+
     new_components: List[str] = []
     for path, node in _iter_tree(tree):
+        if path in matched_paths:
+            continue
         semantic = _semantic_hint(node)
-        if semantic and semantic.lower() not in existing_names:
-            new_components.append(semantic)
+        if not semantic:
+            continue
+        low = semantic.lower()
+        if low in existing_hints:
+            continue
+        if any(low in hint for hint in existing_hints):
+            continue
+        new_components.append(semantic)
     new_components = sorted(set(new_components) - seen_components)
 
     return suggestions, new_components
