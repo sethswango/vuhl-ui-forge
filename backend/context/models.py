@@ -62,8 +62,20 @@ class PatternSignals(BaseModel):
     uses_hooks: bool = False
     uses_composition_api: bool = False
     uses_rxjs: bool = False
+    uses_react_memo: bool = Field(
+        default=False,
+        description="True when the project uses React.memo, useCallback, or useMemo — a hint that re-render cost is actively managed.",
+    )
     angular_standalone: Optional[bool] = None
     angular_zoneless: bool = False
+    angular_on_push: Optional[bool] = Field(
+        default=None,
+        description="True when the project uses ChangeDetectionStrategy.OnPush broadly; implies callers should prefer signals/explicit change detection.",
+    )
+    angular_control_flow: Optional[str] = Field(
+        default=None,
+        description="'modern' (@for/@if/@switch), 'legacy' (*ngFor/*ngIf/*ngSwitch), 'mixed', or None when no template control flow was seen.",
+    )
     state_style: Optional[str] = Field(
         default=None,
         description="Best-guess state idiom: 'signals', 'observables', 'hooks', 'composition', 'classic', or 'unknown'.",

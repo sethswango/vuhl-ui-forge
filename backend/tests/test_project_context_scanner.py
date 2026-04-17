@@ -116,3 +116,140 @@ def test_scanner_raises_on_missing_path(tmp_path) -> None:
     except FileNotFoundError:
         return
     raise AssertionError("scan_project_context should raise when path is missing")
+
+
+# -------------------------------------------------- Round 12: pattern signals
+#
+# OnPush, modern vs legacy control flow, and React memo usage are the three
+# functional-correctness signals that make downstream implementer guidance
+# concrete rather than advisory. Keep these tiny synthetic fixtures fast.
+
+
+def _make_angular_project(tmp_path: Path) -> Path:
+    root = Path(tmp_path) / "ng"
+    root.mkdir()
+    (root / "package.json").write_text(
+        '{"dependencies":{"@angular/core":"^17.0.0","@angular/common":"^17.0.0"}}'
+    )
+    (root / "angular.json").write_text("{}")
+    (root / "src").mkdir()
+    return root
+
+
+def test_scanner_detects_on_push_change_detection(tmp_path) -> None:
+    root = _make_angular_project(tmp_path)
+    (root / "src" / "card.component.ts").write_text(
+        "import { Component, ChangeDetectionStrategy } from '@angular/core';\n"
+        "@Component({\n"
+        "  selector: 'app-card',\n"
+        "  standalone: true,\n"
+        "  changeDetection: ChangeDetectionStrategy.OnPush,\n"
+        "  templateUrl: './card.component.html',\n"
+        "})\n"
+        "export class CardComponent {}\n"
+    )
+
+    project = scan_project_context(root)
+    assert project.framework.name == "angular"
+    assert project.patterns.angular_on_push is True
+
+
+def test_scanner_defaults_angular_on_push_to_false_when_components_lack_it(
+    tmp_path,
+) -> None:
+    root = _make_angular_project(tmp_path)
+    (root / "src" / "plain.component.ts").write_text(
+        "import { Component } from '@angular/core';\n"
+        "@Component({ selector: 'app-plain', standalone: true, template: '<p>hi</p>' })\n"
+        "export class PlainComponent {}\n"
+    )
+
+    project = scan_project_context(root)
+    assert project.framework.name == "angular"
+    assert project.patterns.angular_on_push is False
+
+
+def test_scanner_detects_modern_control_flow(tmp_path) -> None:
+    root = _make_angular_project(tmp_path)
+    (root / "src" / "list.component.ts").write_text(
+        "import { Component } from '@angular/core';\n"
+        "@Component({ selector: 'app-list', standalone: true, templateUrl: './list.component.html' })\n"
+        "export class ListComponent { items = [1,2,3]; }\n"
+    )
+    (root / "src" / "list.component.html").write_text(
+        "<ul>@for (item of items; track item) { <li>{{ item }}</li> }</ul>\n"
+        "@if (items.length === 0) { <p>empty</p> }\n"
+    )
+
+    project = scan_project_context(root)
+    assert project.patterns.angular_control_flow == "modern"
+
+
+def test_scanner_detects_legacy_control_flow(tmp_path) -> None:
+    root = _make_angular_project(tmp_path)
+    (root / "src" / "list.component.ts").write_text(
+        "import { Component } from '@angular/core';\n"
+        "@Component({ selector: 'app-list', standalone: true, templateUrl: './list.component.html' })\n"
+        "export class ListComponent { items = [1,2,3]; }\n"
+    )
+    (root / "src" / "list.component.html").write_text(
+        "<ul><li *ngFor=\"let item of items\">{{ item }}</li></ul>\n"
+        "<p *ngIf=\"items.length === 0\">empty</p>\n"
+    )
+
+    project = scan_project_context(root)
+    assert project.patterns.angular_control_flow == "legacy"
+
+
+def test_scanner_detects_mixed_control_flow(tmp_path) -> None:
+    root = _make_angular_project(tmp_path)
+    (root / "src" / "legacy.component.html").write_text(
+        "<ul><li *ngFor=\"let item of items\">{{ item }}</li></ul>\n"
+    )
+    (root / "src" / "modern.component.html").write_text(
+        "<ul>@for (item of items; track item) { <li>{{ item }}</li> }</ul>\n"
+    )
+
+    project = scan_project_context(root)
+    assert project.patterns.angular_control_flow == "mixed"
+
+
+def test_scanner_detects_react_memo(tmp_path) -> None:
+    root = Path(tmp_path) / "rr"
+    root.mkdir()
+    (root / "package.json").write_text('{"dependencies":{"react":"^18.0.0"}}')
+    (root / "src").mkdir()
+    (root / "src" / "Row.tsx").write_text(
+        "import { memo, useCallback, useMemo } from 'react';\n"
+        "export const Row = React.memo(({ id, label, onSelect }) => {\n"
+        "  const formatted = useMemo(() => label.toUpperCase(), [label]);\n"
+        "  const handle = useCallback(() => onSelect(id), [id, onSelect]);\n"
+        "  return <li onClick={handle}>{formatted}</li>;\n"
+        "});\n"
+    )
+
+    project = scan_project_context(root)
+    assert project.framework.name == "react"
+    assert project.patterns.uses_react_memo is True
+
+
+def test_scanner_evidence_lists_new_signals(tmp_path) -> None:
+    root = _make_angular_project(tmp_path)
+    (root / "src" / "card.component.ts").write_text(
+        "import { Component, ChangeDetectionStrategy } from '@angular/core';\n"
+        "@Component({\n"
+        "  selector: 'app-card',\n"
+        "  standalone: true,\n"
+        "  changeDetection: ChangeDetectionStrategy.OnPush,\n"
+        "  templateUrl: './card.component.html',\n"
+        "})\n"
+        "export class CardComponent {}\n"
+    )
+    (root / "src" / "card.component.html").write_text(
+        "<div>@if (ready) { <p>hi</p> }</div>\n"
+    )
+
+    project = scan_project_context(root)
+    evidence_joined = " | ".join(project.patterns.evidence)
+    assert "OnPush" in evidence_joined
+    assert "modern=" in evidence_joined or "modern=1" in evidence_joined

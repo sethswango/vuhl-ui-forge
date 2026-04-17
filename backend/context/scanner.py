@@ -414,6 +414,10 @@ def _scan_source_tree(
     standalone_votes_true = 0
     standalone_votes_false = 0
     zoneless_hits = 0
+    on_push_hits = 0
+    modern_control_flow_hits = 0
+    legacy_control_flow_hits = 0
+    react_memo_hits = 0
     files_scanned = 0
     truncated = False
     naming_votes: Dict[str, int] = {}
@@ -439,6 +443,22 @@ def _scan_source_tree(
             rxjs_count += 1
         if "provideZonelessChangeDetection" in text or "zoneless" in text.lower():
             zoneless_hits += 1
+        if "ChangeDetectionStrategy.OnPush" in text:
+            on_push_hits += 1
+        # Angular 17+ control-flow syntax vs legacy structural directives. We match
+        # with a trailing char to avoid catching decorators (`@for` is ambiguous
+        # in isolation since decorators take the same form); the template uses
+        # `@for (` / `@if (` / `@switch (` which is unambiguous.
+        if "@for (" in text or "@if (" in text or "@switch (" in text:
+            modern_control_flow_hits += 1
+        if "*ngFor" in text or "*ngIf" in text or "*ngSwitch" in text:
+            legacy_control_flow_hits += 1
+        if (
+            "React.memo(" in text
+            or re.search(r"\buseCallback\s*\(", text)
+            or re.search(r"\buseMemo\s*\(", text)
+        ):
+            react_memo_hits += 1
         if re.search(r"from\s+['\"]@/", text) or re.search(r"from\s+['\"]~/", text):
             import_alias_hits += 1
 
@@ -489,10 +509,27 @@ def _scan_source_tree(
     patterns.uses_hooks = hook_count > 0
     patterns.uses_composition_api = composition_count > 0
     patterns.uses_rxjs = rxjs_count > 0
+    patterns.uses_react_memo = react_memo_hits > 0
     patterns.angular_zoneless = zoneless_hits > 0
     if framework.name == "angular":
         if standalone_votes_true or standalone_votes_false:
             patterns.angular_standalone = standalone_votes_true >= standalone_votes_false
+        # OnPush is opt-in per component; presence of any OnPush usage is a
+        # strong signal that the codebase prefers it. We don't require a
+        # supermajority because the pattern is sticky — once introduced in a
+        # feature module it tends to propagate.
+        if on_push_hits > 0:
+            patterns.angular_on_push = True
+        elif standalone_votes_true or standalone_votes_false:
+            # We saw Angular components but no OnPush — default to False so
+            # downstream guidance can explicitly recommend it.
+            patterns.angular_on_push = False
+        if modern_control_flow_hits and legacy_control_flow_hits:
+            patterns.angular_control_flow = "mixed"
+        elif modern_control_flow_hits:
+            patterns.angular_control_flow = "modern"
+        elif legacy_control_flow_hits:
+            patterns.angular_control_flow = "legacy"
         if patterns.uses_signals and signal_count >= observable_count:
             patterns.state_style = "signals"
         elif patterns.uses_observables:
@@ -522,6 +559,10 @@ def _scan_source_tree(
         composition_count=composition_count,
         rxjs_count=rxjs_count,
         zoneless_hits=zoneless_hits,
+        on_push_hits=on_push_hits,
+        modern_control_flow_hits=modern_control_flow_hits,
+        legacy_control_flow_hits=legacy_control_flow_hits,
+        react_memo_hits=react_memo_hits,
         standalone_votes_true=standalone_votes_true,
         standalone_votes_false=standalone_votes_false,
     )
@@ -545,6 +586,10 @@ def _build_pattern_evidence(
     composition_count: int,
     rxjs_count: int,
     zoneless_hits: int,
+    on_push_hits: int,
+    modern_control_flow_hits: int,
+    legacy_control_flow_hits: int,
+    react_memo_hits: int,
     standalone_votes_true: int,
     standalone_votes_false: int,
 ) -> List[str]:
@@ -563,6 +608,19 @@ def _build_pattern_evidence(
         evidence.append(f"{rxjs_count} file(s) import rxjs")
     if zoneless_hits:
         evidence.append(f"{zoneless_hits} file(s) reference zoneless change detection")
+    if on_push_hits:
+        evidence.append(
+            f"{on_push_hits} file(s) use ChangeDetectionStrategy.OnPush"
+        )
+    if modern_control_flow_hits or legacy_control_flow_hits:
+        evidence.append(
+            "Template control flow: "
+            f"modern={modern_control_flow_hits}, legacy={legacy_control_flow_hits}"
+        )
+    if react_memo_hits:
+        evidence.append(
+            f"{react_memo_hits} file(s) use React.memo/useCallback/useMemo"
+        )
     if standalone_votes_true or standalone_votes_false:
         evidence.append(
             f"Angular standalone votes: true={standalone_votes_true}, false={standalone_votes_false}"

@@ -494,6 +494,7 @@ def _alignment_notes(
     has_lists = any(hint.kind == "list" for hint in state_hints)
     has_async = any(hint.kind == "async_data" for hint in state_hints)
     has_toggles = any(hint.kind == "toggle" for hint in state_hints)
+    has_large_list = _detect_large_list(state_hints)
 
     if framework == "angular":
         _angular_alignment_notes(
@@ -530,6 +531,24 @@ def _alignment_notes(
             " instead of inline JavaScript strings."
         )
 
+    if has_toggles:
+        notes.append(
+            "Keyboard a11y: every element with `aria-pressed`/`aria-expanded`"
+            " must respond to Space and Enter keydown in addition to click."
+            " Wire a keyboard handler (or use the project's button primitive)"
+            " — screen-reader users lose the interaction otherwise."
+        )
+
+    if has_large_list:
+        notes.append(
+            "List size: this variant hand-writes a sizable list. If the real"
+            " data set can exceed ~50 rows, reach for"
+            " `cdk-virtual-scroll-viewport` (Angular),"
+            " `react-window`/`react-virtualized` (React), or a project-approved"
+            " virtualization component — not a plain iteration — to keep"
+            " rendering and scroll cost predictable."
+        )
+
     _conventions_alignment_notes(notes, conventions=conventions, framework=framework)
 
     notes.append(
@@ -539,6 +558,21 @@ def _alignment_notes(
         " existing components over the literal output."
     )
     return _dedupe_preserve_order(notes)
+
+
+def _detect_large_list(state_hints: List[StateHint]) -> bool:
+    """Heuristic: a list hint whose summary mentions a child count >= 8 is
+    worth calling out for virtualization. We parse the existing summary
+    rather than changing the StateHint shape because the information is
+    already encoded there (`"<ul> with N children should render..."`).
+    """
+    for hint in state_hints:
+        if hint.kind != "list":
+            continue
+        match = re.search(r"with (\d+) children", hint.summary)
+        if match and int(match.group(1)) >= 8:
+            return True
+    return False
 
 
 def _angular_alignment_notes(
@@ -551,6 +585,7 @@ def _angular_alignment_notes(
     has_toggles: bool,
 ) -> None:
     state_style = (patterns.state_style or "").lower()
+    control_flow = (patterns.angular_control_flow or "").lower()
 
     if patterns.uses_signals or state_style == "signals":
         notes.append(
@@ -594,25 +629,34 @@ def _angular_alignment_notes(
             " export it if it is consumed outside the module."
         )
 
+    # Change-detection guidance. We emit it every time for Angular because it
+    # is the single biggest lever for DOM re-render cost, and implementer
+    # agents routinely skip setting `changeDetection` when scaffolding.
+    if patterns.angular_on_push:
+        notes.append(
+            "Change detection: this project uses `ChangeDetectionStrategy.OnPush`."
+            " The new component MUST declare `changeDetection:"
+            " ChangeDetectionStrategy.OnPush` — omitting it regresses the"
+            " project's rendering contract."
+        )
+    elif patterns.uses_signals or state_style == "signals":
+        notes.append(
+            "Change detection: pair signals with `changeDetection:"
+            " ChangeDetectionStrategy.OnPush`. Signals only reliably cut"
+            " re-renders when the component is also OnPush — default CD"
+            " dirties the whole view on every microtask."
+        )
+
     if patterns.angular_zoneless:
         notes.append(
-            "Change detection: project runs zoneless. Avoid APIs that assume"
-            " zone-based CD (e.g. direct `Date.now()` in templates, timers"
-            " outside of `NgZone.run`); prefer signals or explicit `markForCheck`."
+            "Zoneless: project runs zoneless change detection. Avoid APIs"
+            " that assume zone-based CD (e.g. direct `Date.now()` in templates,"
+            " timers outside of `NgZone.run`); prefer signals or explicit"
+            " `markForCheck`."
         )
 
     if has_lists:
-        if patterns.uses_signals or state_style == "signals":
-            notes.append(
-                "Lists: render with `@for (item of items(); track item.id)` and"
-                " back `items` with a signal. The literal markup in the spec is"
-                " a placeholder, not a source of truth."
-            )
-        else:
-            notes.append(
-                "Lists: render from an iterable via `@for` (Angular 17+) or"
-                " `*ngFor`; do not hand-code repeated markup."
-            )
+        _angular_list_notes(notes, patterns=patterns, control_flow=control_flow)
 
     if has_forms:
         if patterns.uses_signals or state_style == "signals":
@@ -656,6 +700,69 @@ def _angular_alignment_notes(
         )
 
 
+def _angular_list_notes(
+    notes: List[str],
+    *,
+    patterns: Any,
+    control_flow: str,
+) -> None:
+    """Emit control-flow-aware list guidance.
+
+    The literal HTML from the variant is hand-duplicated markup; the
+    implementer must bind it to a collection. We prefer the project's existing
+    control-flow idiom so the new code doesn't drift from the rest of the
+    codebase. `track` is always emphasized because the most common failure
+    mode is an implementer forgetting it and accepting default identity
+    tracking on object references.
+    """
+    state_style = (patterns.state_style or "").lower()
+    signals_ready = patterns.uses_signals or state_style == "signals"
+
+    if control_flow == "legacy":
+        notes.append(
+            "Lists: project uses legacy structural directives. Render with"
+            " `*ngFor=\"let item of items; trackBy: trackById\"` and provide a"
+            " stable `trackBy` — falling back to identity tracking on object"
+            " references re-renders every row on every change."
+        )
+    elif control_flow == "modern":
+        if signals_ready:
+            notes.append(
+                "Lists: project uses modern control flow. Render with"
+                " `@for (item of items(); track item.id)` and back `items`"
+                " with a signal. `track` is mandatory — default identity"
+                " tracking thrashes on object references."
+            )
+        else:
+            notes.append(
+                "Lists: project uses modern control flow. Render with"
+                " `@for (item of items; track item.id)` and always provide a"
+                " `track` expression; skipping it thrashes the DOM."
+            )
+    elif control_flow == "mixed":
+        notes.append(
+            "Lists: project mixes modern (`@for`) and legacy (`*ngFor`)"
+            " control flow. Match the style of the surrounding feature module"
+            " and always provide a `track` / `trackBy` — skipping it forces a"
+            " full re-render on every change."
+        )
+    else:
+        if signals_ready:
+            notes.append(
+                "Lists: render with `@for (item of items(); track item.id)`"
+                " and back `items` with a signal. The literal markup in the"
+                " spec is a placeholder, not a source of truth."
+            )
+        else:
+            notes.append(
+                "Lists: render from an iterable via `@for (item of items;"
+                " track item.id)` (Angular 17+) or `*ngFor=\"let item of"
+                " items; trackBy: trackById\"`. Always supply the track"
+                " expression — it is the difference between O(n) and O(1)"
+                " DOM updates."
+            )
+
+
 def _react_alignment_notes(
     notes: List[str],
     *,
@@ -671,10 +778,19 @@ def _react_alignment_notes(
             " with `useState`/`useReducer` and side effects with `useEffect`;"
             " extract cross-component state into custom hooks."
         )
+    if patterns.uses_react_memo:
+        notes.append(
+            "Re-render budget: this project actively uses"
+            " `React.memo`/`useCallback`/`useMemo`. Memoize derived values,"
+            " wrap expensive child components in `React.memo`, and pass"
+            " stable callback refs to children — introducing inline lambdas"
+            " would break the project's memoization contract."
+        )
     if has_lists:
         notes.append(
             "Lists: render from an iterable via `.map(...)` with a stable"
-            " `key`. Do not hand-code repeated markup."
+            " `key` (prefer a domain id, not the array index). Hand-coded"
+            " repeated markup is a bug, not a starting point."
         )
     if has_forms:
         notes.append(
@@ -879,6 +995,18 @@ def _render_markdown(
         " variant into the target project."
     )
     lines.append("")
+    # Self-documentation banner — positioned immediately after the header so
+    # any implementer agent reading from the top internalizes the "project
+    # patterns outrank the literal spec" rule before touching the code.
+    lines.append(
+        "> **Project patterns outrank this spec.** The HTML, copy,"
+        " iconography, and sample data below are an approximation of a"
+        " screenshot. Where the alignment notes or the target project's"
+        " patterns disagree with the literal markup, the project wins."
+        " Push the implementation **further** toward idiomatic code than"
+        " this spec does."
+    )
+    lines.append("")
     lines.append(f"- Session: `{spec.session_id}`")
     if spec.model:
         lines.append(f"- Source model: `{spec.model}`")
@@ -887,6 +1015,36 @@ def _render_markdown(
         lines.append(
             f"- Project context fingerprint: `{spec.project_context_fingerprint}`"
         )
+    lines.append("")
+
+    # Non-negotiables — the short, memorable rules the implementer must honor
+    # regardless of how the LLM scaffolded the markup. Kept tight on purpose;
+    # every bullet here is one the downstream agent tends to get wrong.
+    lines.append("## Non-negotiables")
+    lines.append("")
+    lines.append(
+        "- **Reuse existing components.** Replace look-alike markup with the"
+        " matching project component before writing anything new."
+    )
+    lines.append(
+        "- **No inline event handlers.** Translate `onclick=\"...\"` strings"
+        " into the framework's idiomatic binding (`(click)`, `onClick`,"
+        " `@click`). Never ship inline JavaScript."
+    )
+    lines.append(
+        "- **No hand-written list duplication.** Every repeating element must"
+        " bind to a data source with a stable key/track expression."
+    )
+    lines.append(
+        "- **Tokens over literals.** Prefer the project's CSS tokens,"
+        " Tailwind theme, or SCSS variables over raw colors, fonts, and"
+        " pixel values."
+    )
+    lines.append(
+        "- **Preserve accessibility.** Every `aria-*` attribute keeps its"
+        " semantic meaning and keyboard behavior in the implementation — if"
+        " you can't click it with a keyboard, it isn't done."
+    )
     lines.append("")
 
     lines.append("## Align with project patterns")
@@ -1006,12 +1164,21 @@ def _render_markdown(
         "- [ ] Replace literal colors with project tokens where a token exists."
     )
     lines.append(
-        "- [ ] Render repeating elements from data, never from hand-written"
-        " duplicates."
+        "- [ ] Render repeating elements from data with a stable `track` /"
+        " `trackBy` / `key` — never from hand-written duplicates."
     )
     lines.append(
         "- [ ] Bind every event through framework-idiomatic syntax — no inline"
         " `on*=` strings."
+    )
+    # Framework-conditional checklist items surface the specific functional
+    # contracts of the target project. They complement the alignment notes
+    # by making the "done" definition concrete rather than advisory.
+    has_toggles = any(hint.kind == "toggle" for hint in spec.state_hints)
+    _append_contextual_checklist(
+        lines,
+        project_context=project_context,
+        has_toggles=has_toggles,
     )
     lines.append(
         "- [ ] Leave a short comment only where behavior is non-obvious;"
@@ -1020,6 +1187,44 @@ def _render_markdown(
     lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _append_contextual_checklist(
+    lines: List[str],
+    *,
+    project_context: Optional[ProjectContext],
+    has_toggles: bool,
+) -> None:
+    if project_context is None:
+        return
+    framework = project_context.framework.name
+    patterns = project_context.patterns
+
+    if framework == "angular":
+        if patterns.angular_on_push or patterns.uses_signals:
+            lines.append(
+                "- [ ] Declare `changeDetection: ChangeDetectionStrategy.OnPush`"
+                " on the new component — mandatory for signal-backed views"
+                " and for matching the project's rendering contract."
+            )
+        if patterns.angular_standalone:
+            lines.append(
+                "- [ ] Set `standalone: true` and import dependencies directly"
+                " on the component — no NgModule registration."
+            )
+    elif framework in {"react", "next"}:
+        if patterns.uses_react_memo:
+            lines.append(
+                "- [ ] Memoize callbacks (`useCallback`) and derived values"
+                " (`useMemo`); wrap expensive children in `React.memo` to"
+                " stay aligned with the project's re-render budget."
+            )
+
+    if has_toggles:
+        lines.append(
+            "- [ ] Handle Space and Enter keydown on every `aria-pressed` /"
+            " `aria-expanded` element — click-only is a regression."
+        )
 
 
 def _render_tree_lines(
