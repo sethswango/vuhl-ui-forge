@@ -1,6 +1,7 @@
 import { useProjectStore } from "../../store/project-store";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useThrottle } from "../../hooks/useThrottle";
+import { sanitizeForIframe } from "../preview/extractHtml";
 import {
   CODE_GENERATION_MODEL_DESCRIPTIONS,
   CodeGenerationModel,
@@ -29,6 +30,10 @@ function VariantThumbnail({ code, isSelected }: VariantThumbnailProps) {
   const [scale, setScale] = useState(0.1);
 
   const throttledCode = useThrottle(code, isSelected ? 300 : 2000);
+  const iframeDoc = useMemo(
+    () => sanitizeForIframe(throttledCode),
+    [throttledCode],
+  );
 
   useEffect(() => {
     const container = containerRef.current;
@@ -49,9 +54,9 @@ function VariantThumbnail({ code, isSelected }: VariantThumbnailProps) {
   useEffect(() => {
     const iframe = iframeRef.current;
     if (iframe) {
-      iframe.srcdoc = throttledCode;
+      iframe.srcdoc = iframeDoc;
     }
-  }, [throttledCode]);
+  }, [iframeDoc]);
 
   const scaledHeight = IFRAME_HEIGHT * scale;
 

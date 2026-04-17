@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useMemo, useReducer, useRef } from "react";
 import { LuArrowUp, LuImagePlus, LuRefreshCw, LuX } from "react-icons/lu";
 import { toast } from "react-hot-toast";
 
@@ -11,6 +11,7 @@ import {
 } from "../../lib/models";
 import { useThrottle } from "../../hooks/useThrottle";
 import { queueRefinement } from "../../lib/design-api";
+import { sanitizeForIframe } from "../../components/preview/extractHtml";
 
 import { getIterateActions } from "./bridge";
 import {
@@ -45,12 +46,13 @@ function modelLabel(model: string | null | undefined): string | null {
 function BeforeThumbnail({ code, label }: { code: string; label: string | null }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const throttled = useThrottle(code, 300);
+  const iframeDoc = useMemo(() => sanitizeForIframe(throttled), [throttled]);
 
   useEffect(() => {
     if (iframeRef.current) {
-      iframeRef.current.srcdoc = throttled;
+      iframeRef.current.srcdoc = iframeDoc;
     }
-  }, [throttled]);
+  }, [iframeDoc]);
 
   return (
     <div className="flex flex-col gap-1">

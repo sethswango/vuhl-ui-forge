@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import classNames from "classnames";
 import useThrottle from "../../hooks/useThrottle";
 import { useAppStore } from "../../store/app-store";
 import { addHighlight, removeHighlight } from "../select-and-edit/utils";
+import { sanitizeForIframe } from "./extractHtml";
 
 interface Props {
   code: string;
@@ -25,6 +26,11 @@ function PreviewComponent({
 
   // Don't update code more often than every 200ms.
   const throttledCode = useThrottle(code, 200);
+  // LLMs occasionally wrap their HTML output in markdown code fences or
+  // emit fragments without an `<html>` wrapper (most visible mid-stream).
+  // Sanitize at the iframe boundary so the preview never renders literal
+  // ```html``` fences or shows a blank frame for fragment-only output.
+  const iframeDoc = useMemo(() => sanitizeForIframe(throttledCode), [throttledCode]);
 
   // Select and edit functionality
   const [clickEvent, setClickEvent] = useState<MouseEvent | null>(null);
@@ -153,10 +159,10 @@ function PreviewComponent({
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
-    if (iframe.srcdoc !== throttledCode) {
-      iframe.srcdoc = throttledCode;
+    if (iframe.srcdoc !== iframeDoc) {
+      iframe.srcdoc = iframeDoc;
     }
-  }, [throttledCode]);
+  }, [iframeDoc]);
 
   return (
     <div
