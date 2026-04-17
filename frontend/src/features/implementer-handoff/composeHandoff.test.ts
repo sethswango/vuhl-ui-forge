@@ -1,4 +1,5 @@
 import { composeHandoff, type AngularScaffold } from "./composeHandoff";
+import type { UserIntent } from "./extractUserIntent";
 import type {
   DesignSpecResult,
   ProjectContext,
@@ -262,5 +263,168 @@ describe("composeHandoff", () => {
     });
 
     expect(markdown).toContain("**Scan warnings:** `skipped 2 files over 500kb`");
+  });
+
+  it("omits the User intent section when no userIntent is provided", () => {
+    const markdown = composeHandoff({
+      variantIndex: 0,
+      variantCode: "<div />",
+      specResult: baseSpec(),
+      projectContext: null,
+      generatedAt: FIXED_STAMP,
+    });
+    expect(markdown).not.toContain("## User intent");
+  });
+
+  it("renders the initial prompt and refinement log in order", () => {
+    const intent: UserIntent = {
+      initialPrompt: "A settings card with a dark mode toggle and save button",
+      initialImagesCount: 2,
+      initialVideosCount: 0,
+      inputMode: "image",
+      refinements: [
+        {
+          text: "Make the toggle appear as an iOS-style switch",
+          imagesCount: 0,
+        },
+        {
+          text: "Tighten spacing and match the card radius to 12px",
+          imagesCount: 1,
+          selectedElementPreview:
+            "<div class='settings-card'>…</div>",
+        },
+      ],
+    };
+
+    const markdown = composeHandoff({
+      variantIndex: 0,
+      variantCode: "<div />",
+      specResult: baseSpec(),
+      projectContext: null,
+      userIntent: intent,
+      generatedAt: FIXED_STAMP,
+    });
+
+    expect(markdown).toContain("## User intent");
+    expect(markdown).toContain("**Original prompt:**");
+    expect(markdown).toContain(
+      "> A settings card with a dark mode toggle and save button",
+    );
+    expect(markdown).toContain("_Attached to the original prompt:_ 2 images.");
+    expect(markdown).toContain("**Refinement log (oldest → newest):**");
+    expect(markdown).toContain(
+      "1. Make the toggle appear as an iOS-style switch",
+    );
+    expect(markdown).toContain(
+      "2. Tighten spacing and match the card radius to 12px",
+    );
+    expect(markdown).toContain("1 image attached");
+    expect(markdown).toContain(
+      "targeted element: `<div class='settings-card'>…</div>`",
+    );
+    expect(markdown).toContain(
+      "Treat these as the user's acceptance criteria",
+    );
+  });
+
+  it("notes when there are no refinements", () => {
+    const intent: UserIntent = {
+      initialPrompt: "Just a hello world card",
+      initialImagesCount: 0,
+      initialVideosCount: 0,
+      inputMode: "text",
+      refinements: [],
+    };
+
+    const markdown = composeHandoff({
+      variantIndex: 0,
+      variantCode: "<div />",
+      specResult: baseSpec(),
+      projectContext: null,
+      userIntent: intent,
+      generatedAt: FIXED_STAMP,
+    });
+
+    expect(markdown).toContain("## User intent");
+    expect(markdown).toContain("Just a hello world card");
+    expect(markdown).toContain(
+      "_No subsequent refinements — the user accepted the initial render._",
+    );
+    expect(markdown).not.toContain("**Refinement log");
+  });
+
+  it("falls back to a placeholder when the initial request was image-only", () => {
+    const intent: UserIntent = {
+      initialPrompt: "",
+      initialImagesCount: 1,
+      initialVideosCount: 0,
+      inputMode: "image",
+      refinements: [],
+    };
+
+    const markdown = composeHandoff({
+      variantIndex: 0,
+      variantCode: "<div />",
+      specResult: baseSpec(),
+      projectContext: null,
+      userIntent: intent,
+      generatedAt: FIXED_STAMP,
+    });
+
+    expect(markdown).toContain(
+      "_Original prompt was an image (no text was provided)._",
+    );
+    expect(markdown).toContain("_Attached to the original prompt:_ 1 image.");
+  });
+
+  it("labels image-only refinements cleanly", () => {
+    const intent: UserIntent = {
+      initialPrompt: "Dashboard",
+      initialImagesCount: 0,
+      initialVideosCount: 0,
+      inputMode: "text",
+      refinements: [
+        { text: "", imagesCount: 1 },
+      ],
+    };
+
+    const markdown = composeHandoff({
+      variantIndex: 0,
+      variantCode: "<div />",
+      specResult: baseSpec(),
+      projectContext: null,
+      userIntent: intent,
+      generatedAt: FIXED_STAMP,
+    });
+
+    expect(markdown).toContain("1. _(image-only refinement)_");
+    expect(markdown).toContain("1 image attached");
+  });
+
+  it("places the User intent section after Goal and before Project context", () => {
+    const intent: UserIntent = {
+      initialPrompt: "A blue button",
+      initialImagesCount: 0,
+      initialVideosCount: 0,
+      inputMode: "text",
+      refinements: [],
+    };
+    const markdown = composeHandoff({
+      variantIndex: 0,
+      variantCode: "<div />",
+      specResult: baseSpec(),
+      projectContext: baseProjectContext(),
+      userIntent: intent,
+      generatedAt: FIXED_STAMP,
+    });
+
+    const goalIdx = markdown.indexOf("## Goal");
+    const intentIdx = markdown.indexOf("## User intent");
+    const contextIdx = markdown.indexOf("## Project context");
+    expect(goalIdx).toBeGreaterThan(-1);
+    expect(intentIdx).toBeGreaterThan(-1);
+    expect(contextIdx).toBeGreaterThan(-1);
+    expect(goalIdx).toBeLessThan(intentIdx);
+    expect(intentIdx).toBeLessThan(contextIdx);
   });
 });

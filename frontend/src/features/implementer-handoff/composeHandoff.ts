@@ -22,6 +22,7 @@ import type {
   ProjectContext,
   ProjectFramework,
 } from "../../lib/design-api-types";
+import type { UserIntent } from "./extractUserIntent";
 
 export interface ComposeHandoffInput {
   variantIndex: number;
@@ -30,6 +31,13 @@ export interface ComposeHandoffInput {
   specResult: DesignSpecResult;
   projectContext?: ProjectContext | null;
   angularConversion?: AngularScaffold | null;
+  /**
+   * Optional user-intent record derived from the commit chain. When present
+   * the handoff emits a dedicated "User intent" section so the implementer
+   * agent can read the original prompt + iteration log before diving into
+   * tokens and component reuse.
+   */
+  userIntent?: UserIntent | null;
   /**
    * Override the timestamp stamped into the handoff metadata. Defaults to a
    * fresh `new Date().toISOString()`. Tests should pin it to keep snapshots
@@ -58,6 +66,7 @@ export function composeHandoff(input: ComposeHandoffInput): string {
     specResult,
     projectContext,
     angularConversion,
+    userIntent,
     generatedAt,
   } = input;
 
@@ -66,6 +75,9 @@ export function composeHandoff(input: ComposeHandoffInput): string {
   sections.push(HEADING);
   sections.push(buildMetadataBlock(variantIndex, variantModel, projectContext, generatedAt));
   sections.push(buildGoalSection(specResult));
+
+  const intentSection = buildUserIntentSection(userIntent);
+  if (intentSection) sections.push(intentSection);
 
   const contextSection = buildProjectContextSection(projectContext);
   if (contextSection) sections.push(contextSection);
@@ -120,6 +132,88 @@ function buildGoalSection(specResult: DesignSpecResult): string {
     lines.push("", `> ${summary.replace(/\n+/g, " ")}`);
   }
   return lines.join("\n");
+}
+
+function buildUserIntentSection(
+  userIntent: UserIntent | null | undefined,
+): string | null {
+  if (!userIntent) return null;
+
+  const lines: string[] = ["## User intent", ""];
+
+  const initialPrompt = userIntent.initialPrompt.trim();
+  if (initialPrompt) {
+    lines.push("**Original prompt:**", "", formatQuotedBlock(initialPrompt));
+  } else if (userIntent.inputMode === "image") {
+    lines.push("_Original prompt was an image (no text was provided)._");
+  } else if (userIntent.inputMode === "video") {
+    lines.push("_Original prompt was a video recording (no text was provided)._");
+  } else {
+    lines.push("_No text prompt was captured for the initial request._");
+  }
+
+  const modalityParts: string[] = [];
+  if (userIntent.initialImagesCount > 0) {
+    modalityParts.push(
+      `${userIntent.initialImagesCount} image${userIntent.initialImagesCount === 1 ? "" : "s"}`,
+    );
+  }
+  if (userIntent.initialVideosCount > 0) {
+    modalityParts.push(
+      `${userIntent.initialVideosCount} video${userIntent.initialVideosCount === 1 ? "" : "s"}`,
+    );
+  }
+  if (modalityParts.length > 0) {
+    lines.push("", `_Attached to the original prompt:_ ${modalityParts.join(", ")}.`);
+  }
+
+  if (userIntent.refinements.length > 0) {
+    lines.push("", "**Refinement log (oldest → newest):**", "");
+    userIntent.refinements.forEach((refinement, index) => {
+      const ordinal = index + 1;
+      const text = refinement.text.length > 0 ? refinement.text : "_(image-only refinement)_";
+      lines.push(`${ordinal}. ${inlineEscape(text)}`);
+      const meta: string[] = [];
+      if (refinement.imagesCount > 0) {
+        meta.push(
+          `${refinement.imagesCount} image${refinement.imagesCount === 1 ? "" : "s"} attached`,
+        );
+      }
+      if (refinement.selectedElementPreview) {
+        meta.push(
+          `targeted element: \`${refinement.selectedElementPreview}\``,
+        );
+      }
+      if (meta.length > 0) {
+        lines.push(`   - ${meta.join(" · ")}`);
+      }
+    });
+  } else if (initialPrompt || modalityParts.length > 0) {
+    lines.push("", "_No subsequent refinements — the user accepted the initial render._");
+  }
+
+  lines.push(
+    "",
+    "Treat these as the user's acceptance criteria. If your implementation",
+    "makes a trade-off that conflicts with the prompt or refinement log,",
+    "surface it explicitly so the user can confirm or correct before merge.",
+  );
+
+  return lines.join("\n");
+}
+
+function formatQuotedBlock(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .map((line) => (line.length === 0 ? ">" : `> ${line}`))
+    .join("\n");
+}
+
+function inlineEscape(text: string): string {
+  // Collapse whitespace so a multiline refinement reads cleanly inside a
+  // numbered list item. The raw text is user-authored so we avoid touching
+  // markdown syntax itself (backticks, emphasis), only the layout.
+  return text.replace(/\r?\n+/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 
 function buildProjectContextSection(
