@@ -3,7 +3,11 @@ import { LuClipboardCheck, LuClipboardCopy } from "react-icons/lu";
 import copy from "copy-to-clipboard";
 import { toast } from "react-hot-toast";
 
-import { convertHtmlToAngular } from "../../lib/angular-convert";
+import {
+  convertHtmlToAngular,
+  deriveAngularHints,
+} from "../../lib/angular-convert";
+import { useDesignStore } from "../../store/design-store";
 
 interface CopyAsAngularButtonProps {
   code: string;
@@ -19,6 +23,7 @@ export function CopyAsAngularButton({
   compact,
 }: CopyAsAngularButtonProps) {
   const [copied, setCopied] = useState(false);
+  const projectContext = useDesignStore((s) => s.projectContext);
 
   const handleClick = () => {
     if (!code.trim()) {
@@ -26,7 +31,10 @@ export function CopyAsAngularButton({
       return;
     }
     try {
-      const result = convertHtmlToAngular(code, { componentName });
+      const result = convertHtmlToAngular(code, {
+        componentName,
+        projectHints: deriveAngularHints(projectContext?.patterns ?? null),
+      });
       const followUpBlock =
         result.followUps.length > 0
           ? [

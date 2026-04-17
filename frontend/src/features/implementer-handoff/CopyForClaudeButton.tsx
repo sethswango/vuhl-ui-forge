@@ -12,7 +12,10 @@ import { extractDesignSpec } from "../../lib/design-api";
 import type { DesignSpecResult } from "../../lib/design-api-types";
 import { specCacheKey, useDesignStore } from "../../store/design-store";
 import { useSessionStore } from "../../store/session-store";
-import { convertHtmlToAngular } from "../../lib/angular-convert";
+import {
+  convertHtmlToAngular,
+  deriveAngularHints,
+} from "../../lib/angular-convert";
 import { composeHandoff, type AngularScaffold } from "./composeHandoff";
 import { shouldIncludeAngular } from "./frameworkGate";
 
@@ -69,7 +72,9 @@ export function CopyForClaudeButton({
       return null;
     }
     try {
-      const conversion = convertHtmlToAngular(variantCode);
+      const conversion = convertHtmlToAngular(variantCode, {
+        projectHints: deriveAngularHints(projectContext?.patterns ?? null),
+      });
       return {
         componentTs: conversion.componentTs,
         template: conversion.template,

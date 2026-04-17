@@ -10,6 +10,12 @@
 // heuristics fired on the input so a reviewer can see *why* the output looks
 // the way it does without having to re-run the converter.
 
+import type { AngularProjectHints } from "./hints";
+import { defaultAngularHints } from "./hints";
+
+export type { AngularProjectHints } from "./hints";
+export { deriveAngularHints, defaultAngularHints } from "./hints";
+
 export type AppliedHeuristic =
   | "onclick-to-click"
   | "onchange-to-change"
@@ -24,7 +30,20 @@ export type AppliedHeuristic =
 
 export interface AngularConversionOptions {
   componentName?: string;
+  /**
+   * Explicit override. Prefer ``projectHints`` so signals / standalone /
+   * change-detection stay in sync with the scanned target project.
+   * Present for backward compatibility with callers that only know
+   * about signals.
+   */
   useSignals?: boolean;
+  /**
+   * Hints derived from the target project's ProjectContext.patterns.
+   * When supplied, drives signal emission, standalone declaration,
+   * change-detection strategy, and the follow-up notes attached to
+   * the result.
+   */
+  projectHints?: AngularProjectHints;
 }
 
 export interface AngularConversionResult {
@@ -649,10 +668,15 @@ function renderComponentTs(args: {
   methods: Set<string>;
   useSignals: boolean;
   usesFormsModule: boolean;
+  standalone: boolean;
+  changeDetection: "default" | "onpush";
 }): { componentTs: string; imports: string[] } {
   const imports: string[] = ["@angular/core"];
   const coreImports = new Set<string>(["Component"]);
   if (args.useSignals) coreImports.add("signal");
+  if (args.changeDetection === "onpush") {
+    coreImports.add("ChangeDetectionStrategy");
+  }
   const coreImportLine = `import { ${Array.from(coreImports).join(", ")} } from '@angular/core';`;
 
   const extraImportLines: string[] = [];
@@ -677,9 +701,22 @@ function renderComponentTs(args: {
       ? `\n${fieldsBlock}${fieldsBlock && methodsBlock ? "\n" : ""}${methodsBlock}`
       : "";
 
+  // For non-standalone components, omit `imports:` from the decorator and
+  // instead surface a follow-up telling the implementer to register the
+  // component in their NgModule. Standalone components keep the imports
+  // inline so the scaffold compiles as-is.
   const importsLine =
-    componentImports.length > 0
+    args.standalone && componentImports.length > 0
       ? `\n  imports: [${componentImports.join(", ")}],`
+      : "";
+
+  const standaloneLine = args.standalone
+    ? `  standalone: true,`
+    : `  standalone: false,`;
+
+  const changeDetectionLine =
+    args.changeDetection === "onpush"
+      ? `\n  changeDetection: ChangeDetectionStrategy.OnPush,`
       : "";
 
   const allImportLines = [coreImportLine, ...extraImportLines].join("\n");
@@ -689,7 +726,7 @@ ${allImportLines}
 
 @Component({
   selector: '${args.selector}',
-  standalone: true,${importsLine}
+${standaloneLine}${importsLine}${changeDetectionLine}
   template: \`
 ${indentedTemplate}
   \`,
@@ -700,8 +737,48 @@ export class ${args.componentName} {${classBody}}
   return { componentTs, imports };
 }
 
-function computeFollowUps(ctx: TransformContext): string[] {
+function computeFollowUps(
+  ctx: TransformContext,
+  hints: AngularProjectHints,
+): string[] {
   const followUps: string[] = [];
+
+  // Project-posture notes come first so implementers see "how this fits"
+  // before reading the converter-specific follow-ups.
+  if (!hints.standalone) {
+    followUps.push(
+      "Target project uses NgModules, not standalone components." +
+        " Remove the FormsModule entry from the decorator's imports[] and" +
+        " declare this component in the appropriate NgModule (plus export" +
+        " it if other modules need it). Add FormsModule / ReactiveFormsModule" +
+        " to that NgModule's imports[] instead.",
+    );
+  }
+  if (hints.changeDetection === "onpush" && !hints.useSignals) {
+    followUps.push(
+      "ChangeDetectionStrategy.OnPush is set to match the project's" +
+        " zoneless / signals posture. Any class fields that aren't already" +
+        " signals will need to be signals, observables, or inputs — plain" +
+        " mutable fields won't trigger re-renders under OnPush.",
+    );
+  }
+  if (hints.zoneless) {
+    followUps.push(
+      "Project runs in zoneless change detection. Avoid relying on" +
+        " setTimeout / setInterval / Promise microtasks to trigger renders;" +
+        " reach for signals, observables, or explicit `detectChanges()` /" +
+        " `markForCheck()` calls instead.",
+    );
+  }
+  if (hints.prefersObservables) {
+    followUps.push(
+      "Project leans on RxJS observables. If any of the seeded fields" +
+        " should be reactive streams, convert them to `Observable<T>` +" +
+        " `async` pipe in the template, or bridge with `toSignal(obs$)` to" +
+        " keep the signal-style component API.",
+    );
+  }
+
   if (ctx.usesFormsModule) {
     followUps.push(
       "FormsModule is imported for [(ngModel)] bindings. For complex forms" +
@@ -734,7 +811,15 @@ export function convertHtmlToAngular(
   options: AngularConversionOptions = {},
 ): AngularConversionResult {
   const componentName = options.componentName || "GeneratedComponent";
-  const useSignals = options.useSignals ?? false;
+  const hints: AngularProjectHints = {
+    ...defaultAngularHints(),
+    ...(options.projectHints ?? {}),
+  };
+  // Explicit useSignals overrides the project-derived hint. This keeps
+  // existing callers that only know about the legacy signals flag working.
+  const useSignals =
+    options.useSignals !== undefined ? options.useSignals : hints.useSignals;
+
   const ctx = newContext();
 
   const nodes = parseHtml(html);
@@ -751,12 +836,14 @@ export function convertHtmlToAngular(
     methods: ctx.methods,
     useSignals,
     usesFormsModule: ctx.usesFormsModule,
+    standalone: hints.standalone,
+    changeDetection: hints.changeDetection,
   });
 
   return {
     template,
     componentTs,
     imports,
-    followUps: computeFollowUps(ctx),
+    followUps: computeFollowUps(ctx, { ...hints, useSignals }),
   };
 }
