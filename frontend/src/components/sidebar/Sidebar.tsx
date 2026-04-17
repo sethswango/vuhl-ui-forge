@@ -239,9 +239,10 @@ function Sidebar({
   }, [updateInstruction, autoResize]);
 
   // Reset error expanded state when variant changes
+  const selectedVariantIndexForHead = commits[head || ""]?.selectedVariantIndex;
   useEffect(() => {
     setIsErrorExpanded(false);
-  }, [head, commits[head || ""]?.selectedVariantIndex]);
+  }, [head, selectedVariantIndexForHead]);
 
   // Reset prompt expanded state when commit changes and detect clamping
   useEffect(() => {

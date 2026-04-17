@@ -101,6 +101,7 @@ function Variants() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [variants.length, commit?.isCommitted, selectedVariantIndex, head]);
 
   if (head === null || !commit) {

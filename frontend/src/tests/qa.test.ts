@@ -430,7 +430,7 @@ async function installMockWebSocket(page: Page) {
 
       readyState = MockWebSocket.CONNECTING;
       url: string;
-      listeners: Record<string, Array<(event: any) => void>> = {};
+      listeners: Record<string, Array<(event: unknown) => void>> = {};
 
       constructor(url: string) {
         this.url = url;
@@ -440,14 +440,14 @@ async function installMockWebSocket(page: Page) {
         }, 10);
       }
 
-      addEventListener(type: string, listener: (event: any) => void) {
+      addEventListener(type: string, listener: (event: unknown) => void) {
         if (!this.listeners[type]) {
           this.listeners[type] = [];
         }
         this.listeners[type].push(listener);
       }
 
-      removeEventListener(type: string, listener: (event: any) => void) {
+      removeEventListener(type: string, listener: (event: unknown) => void) {
         if (!this.listeners[type]) return;
         this.listeners[type] = this.listeners[type].filter(
           (existing) => existing !== listener
@@ -489,7 +489,7 @@ async function installMockWebSocket(page: Page) {
         this.emit("close", { code, reason });
       }
 
-      emit(type: string, event: any) {
+      emit(type: string, event: unknown) {
         (this.listeners[type] || []).forEach((listener) => {
           listener(event);
         });

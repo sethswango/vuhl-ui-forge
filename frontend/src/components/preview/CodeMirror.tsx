@@ -46,6 +46,7 @@ function CodeMirror({ code, editorTheme, onCodeChange }: Props) {
           }),
         ],
       }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [editorTheme]
   );
   useEffect(() => {
@@ -60,6 +61,7 @@ function CodeMirror({ code, editorTheme, onCodeChange }: Props) {
         view.current = null;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

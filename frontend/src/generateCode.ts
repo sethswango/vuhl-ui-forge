@@ -11,6 +11,20 @@ const ERROR_MESSAGE =
 
 const CANCEL_MESSAGE = "Code generation cancelled";
 
+export type ToolStartData = {
+  name?: string;
+  input?: unknown;
+};
+
+export type ToolResultData = {
+  ok?: boolean;
+  output?: unknown;
+};
+
+type VariantModelsData = {
+  models?: string[];
+};
+
 type WebSocketResponse = {
   type:
     | "chunk"
@@ -26,7 +40,7 @@ type WebSocketResponse = {
     | "toolStart"
     | "toolResult";
   value?: string;
-  data?: any;
+  data?: ToolStartData | ToolResultData | VariantModelsData;
   eventId?: string;
   variantIndex: number;
 };
@@ -41,8 +55,16 @@ interface CodeGenerationCallbacks {
   onVariantModels: (models: string[]) => void;
   onThinking: (content: string, variantIndex: number, eventId?: string) => void;
   onAssistant: (content: string, variantIndex: number, eventId?: string) => void;
-  onToolStart: (data: any, variantIndex: number, eventId?: string) => void;
-  onToolResult: (data: any, variantIndex: number, eventId?: string) => void;
+  onToolStart: (
+    data: ToolStartData | undefined,
+    variantIndex: number,
+    eventId?: string
+  ) => void;
+  onToolResult: (
+    data: ToolResultData | undefined,
+    variantIndex: number,
+    eventId?: string
+  ) => void;
   onCancel: (
     reason: "user_cancelled" | "request_failed" | "connection_error",
     errorMessage?: string
@@ -80,15 +102,24 @@ export function generateCode(
     } else if (response.type === "variantCount") {
       callbacks.onVariantCount(parseInt(response.value || "1"));
     } else if (response.type === "variantModels") {
-      callbacks.onVariantModels(response.data?.models || []);
+      const modelsData = response.data as VariantModelsData | undefined;
+      callbacks.onVariantModels(modelsData?.models || []);
     } else if (response.type === "thinking") {
       callbacks.onThinking(response.value || "", response.variantIndex, response.eventId);
     } else if (response.type === "assistant") {
       callbacks.onAssistant(response.value || "", response.variantIndex, response.eventId);
     } else if (response.type === "toolStart") {
-      callbacks.onToolStart(response.data, response.variantIndex, response.eventId);
+      callbacks.onToolStart(
+        response.data as ToolStartData | undefined,
+        response.variantIndex,
+        response.eventId
+      );
     } else if (response.type === "toolResult") {
-      callbacks.onToolResult(response.data, response.variantIndex, response.eventId);
+      callbacks.onToolResult(
+        response.data as ToolResultData | undefined,
+        response.variantIndex,
+        response.eventId
+      );
     } else if (response.type === "error") {
       console.error("Error generating code", response.value);
       toast.error(response.value || ERROR_MESSAGE);

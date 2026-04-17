@@ -64,7 +64,7 @@ export function useSession() {
       if (!sessionId) return;
       setApprovalPending(variantIndex);
       try {
-        await selectSessionVariant(sessionId, { variantIndex });
+        await selectSessionVariant(sessionId, variantIndex);
         setApprovalDone();
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

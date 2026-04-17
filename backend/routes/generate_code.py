@@ -2,7 +2,17 @@ import asyncio
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import traceback
-from typing import Callable, Awaitable
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Dict,
+    List,
+    Literal,
+    cast,
+    get_args,
+)
 from fastapi import APIRouter, WebSocket
 import openai
 from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
@@ -15,22 +25,9 @@ from config import (
     NUM_VARIANTS_VIDEO,
     OPENAI_API_KEY,
     OPENAI_BASE_URL,
-    REPLICATE_API_KEY,
 )
 from custom_types import InputMode
-from llm import (
-    Llm,
-)
-from typing import (
-    Any,
-    Callable,
-    Coroutine,
-    Dict,
-    List,
-    Literal,
-    cast,
-    get_args,
-)
+from llm import Llm
 from openai.types.chat import ChatCompletionMessageParam
 
 from utils import print_prompt_preview

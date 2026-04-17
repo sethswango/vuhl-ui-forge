@@ -41,9 +41,7 @@ function App() {
     // Inputs
     inputMode,
     setInputMode,
-    referenceImages,
     setReferenceImages,
-    initialPrompt,
     setInitialPrompt,
     upsertPromptAssets,
     resetPromptAssets,
@@ -238,12 +236,17 @@ function App() {
       return;
     }
 
-    // Re-run the create
+    // Re-run the create using the commit's stored inputs, which are the
+    // authoritative source. `initialPrompt`/`referenceImages` in the store
+    // can drift (e.g. session context loads later), so prefer the commit.
     if (inputMode === "image" || inputMode === "video") {
-      doCreate(referenceImages, inputMode);
+      const media =
+        inputMode === "image"
+          ? currentCommit.inputs.images
+          : currentCommit.inputs.videos ?? [];
+      doCreate(media, inputMode);
     } else {
-      // TODO: Fix this
-      doCreateFromText(initialPrompt);
+      doCreateFromText(currentCommit.inputs.text);
     }
   };
 
