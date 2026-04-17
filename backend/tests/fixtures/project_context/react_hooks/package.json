@@ -1,0 +1,13 @@
+{
+  "name": "react-hooks-fixture",
+  "version": "0.2.1",
+  "private": true,
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.0",
+    "vite": "^5.0.0"
+  }
+}

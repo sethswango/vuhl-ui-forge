@@ -1,0 +1,9 @@
+:root {
+  --color-accent: #2e7d32;
+  --radius-md: 8px;
+}
+
+.card {
+  padding: 1rem;
+  border-radius: var(--radius-md);
+}

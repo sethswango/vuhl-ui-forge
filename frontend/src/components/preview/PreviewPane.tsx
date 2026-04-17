@@ -20,6 +20,8 @@ import { useProjectStore } from "../../store/project-store";
 import { extractHtml } from "./extractHtml";
 import PreviewComponent from "./PreviewComponent";
 import { downloadCode } from "./download";
+import { CopyAsAngularButton } from "../../features/angular-copy/CopyAsAngularButton";
+import { Stack } from "../../lib/stacks";
 
 function openInNewTab(code: string) {
   const newWindow = window.open("", "_blank");
@@ -179,6 +181,12 @@ function PreviewPane({ settings, onOpenVersions }: Props) {
           )}
 
           <div className="flex items-center gap-1">
+            {(appState === AppState.CODE_READY || isSelectedVariantComplete) &&
+              (settings.generatedCodeConfig === Stack.HTML_TAILWIND ||
+                settings.generatedCodeConfig === Stack.HTML_CSS) &&
+              previewCode.trim().length > 0 && (
+                <CopyAsAngularButton code={previewCode} compact />
+              )}
             {(appState === AppState.CODE_READY || isSelectedVariantComplete) && (
               <Button
                 onClick={() => downloadCode(previewCode)}

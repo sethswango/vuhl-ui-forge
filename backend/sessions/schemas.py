@@ -181,3 +181,60 @@ class SessionExportResponse(BaseModel):
             selected_variant=selected,
         )
 
+
+class GatherProjectContextRequest(BaseModel):
+    repo_path: str = Field(..., min_length=1)
+    max_files: int | None = Field(default=None, ge=1, le=5000)
+    max_components: int | None = Field(default=None, ge=1, le=1000)
+    label: str | None = Field(
+        default=None,
+        description="Optional label to store alongside the scan (e.g. 'primary-app').",
+    )
+
+
+class GatherProjectContextResponse(BaseModel):
+    context: SessionContextResponse
+    project_context: Dict[str, Any]
+
+
+class ExtractDesignSpecRequest(BaseModel):
+    variant_index: int | None = Field(default=None, ge=0)
+    variant_id: str | None = None
+    persist_as_context: bool = True
+
+    @model_validator(mode="after")
+    def require_variant_identifier(self) -> "ExtractDesignSpecRequest":
+        if self.variant_index is None and self.variant_id is None:
+            raise ValueError("variant_id or variant_index is required")
+        return self
+
+
+class ExtractDesignSpecResponse(BaseModel):
+    session_id: str
+    variant_index: int
+    variant_id: str
+    spec: Dict[str, Any]
+    annotated_markdown: str
+    context_record: Optional[SessionContextResponse] = None
+
+
+class RefineVariantRequest(BaseModel):
+    variant_index: int = Field(..., ge=0)
+    text: str | None = None
+    image_data_url: str | None = None
+
+    @model_validator(mode="after")
+    def require_any_input(self) -> "RefineVariantRequest":
+        if not (self.text and self.text.strip()) and not self.image_data_url:
+            raise ValueError("At least one of text or image_data_url must be provided")
+        return self
+
+
+class RefineVariantResponse(BaseModel):
+    session_id: str
+    variant_index: int
+    refinement_id: str
+    status: str
+    stream_hint: Dict[str, Any] = Field(default_factory=dict)
+    context_record: Optional[SessionContextResponse] = None
+

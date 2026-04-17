@@ -1,0 +1,8 @@
+:root {
+  --color-primary: #2e7d32;
+  --radius-sm: 4px;
+}
+
+.price-card {
+  border-radius: var(--radius-sm);
+}

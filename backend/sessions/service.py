@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Optional
+from uuid import uuid4
 
 from .models import (
     SessionBundle,
@@ -138,6 +139,42 @@ class SessionService:
                 session_id,
                 variant_id=variant_id,
                 variant_index=variant_index,
+            )
+        except KeyError as exc:
+            raise SessionNotFoundError(session_id) from exc
+
+    async def queue_refinement(
+        self,
+        session_id: str,
+        *,
+        variant_index: int,
+        text: Optional[str],
+        image_data_url: Optional[str],
+    ) -> SessionContextRecord:
+        """Queue a refinement request that the existing WebSocket pipeline reads.
+
+        A refinement is stored as a session context record with
+        ``context_type = 'refinement_queue'``. The frontend's WebSocket flow
+        (or an MCP-aware equivalent) drains the queue by issuing a regular
+        ``/generate-code`` WS call with ``generationType = 'update'`` and
+        ``sessionId`` set. This intentionally avoids introducing a second
+        streaming channel.
+        """
+        refinement_id = str(uuid4())
+        payload: dict[str, Any] = {
+            "refinement_id": refinement_id,
+            "variant_index": variant_index,
+            "text": text,
+            "has_image": image_data_url is not None,
+            "image_data_url": image_data_url,
+            "status": "queued",
+        }
+        try:
+            return await asyncio.to_thread(
+                self._store.create_context,
+                session_id,
+                context_type="refinement_queue",
+                payload=payload,
             )
         except KeyError as exc:
             raise SessionNotFoundError(session_id) from exc

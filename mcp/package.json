@@ -22,6 +22,7 @@
     "start:http": "node dist/server/index.js --http",
     "start:stdio": "node dist/server/index.js --stdio",
     "clean": "rimraf dist",
+    "test": "node --import tsx --test src/server/tools.test.ts",
     "prepublishOnly": "npm run build"
   },
   "repository": {

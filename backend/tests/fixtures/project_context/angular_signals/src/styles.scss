@@ -1,0 +1,13 @@
+$brand-radius: 12px;
+$brand-gutter: 1rem;
+
+:root {
+  --color-accent: #1565c0;
+  --color-surface: #ffffff;
+  --radius-lg: 12px;
+}
+
+.surface {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+}

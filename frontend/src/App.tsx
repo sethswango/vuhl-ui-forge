@@ -26,6 +26,7 @@ import {
 // import TipLink from "./components/messages/TipLink";
 import { useAppStore } from "./store/app-store";
 import { useProjectStore } from "./store/project-store";
+import { registerIterateActions } from "./features/iterate/bridge";
 import { removeHighlight } from "./components/select-and-edit/utils";
 import Sidebar from "./components/sidebar/Sidebar";
 import IconStrip from "./components/sidebar/IconStrip";
@@ -684,6 +685,10 @@ function App() {
       isTermOfServiceAccepted: !open,
     }));
   };
+
+  useEffect(() => {
+    registerIterateActions({ doUpdate, regenerate });
+  });
 
   function setStack(stack: Stack) {
     setSettings((prev) => ({

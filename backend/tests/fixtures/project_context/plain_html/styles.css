@@ -1,0 +1,9 @@
+:root {
+  --color-ink: #1b1b1b;
+  --color-surface: #fafafa;
+}
+
+body {
+  color: var(--color-ink);
+  background: var(--color-surface);
+}
